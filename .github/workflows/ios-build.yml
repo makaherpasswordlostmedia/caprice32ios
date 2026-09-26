@@ -378,14 +378,19 @@ jobs:
 
       - name: Stage libs into Theos SDK lib dir
         run: |
-          # Theos' TARGET=iphone:clang:9.3:9.3 looks for extra libs under
-          # the SDK's usr/lib by default via -L flags in the Makefile
-          # (see Caprice32ARMv7_LDFLAGS -> $(THEOS_STAGING_DIR)/usr/lib).
-          THEOS_STAGING_DIR="$THEOS/sdks/iPhoneOS9.3.sdk"
-          mkdir -p "$THEOS_STAGING_DIR/usr/lib" "$THEOS_STAGING_DIR/usr/include"
-          cp "$IOS_STAGE"/lib/*.a "$THEOS_STAGING_DIR/usr/lib/"
-          cp -r "$IOS_STAGE"/include/* "$THEOS_STAGING_DIR/usr/include/"
-          echo "THEOS_STAGING_DIR=$THEOS_STAGING_DIR" >> $GITHUB_ENV
+          # NOTE: THEOS_STAGING_DIR is a Theos *system* variable (staged
+          # package/product output dir - see theos.dev/docs/variables),
+          # NOT a place to point at the SDK. Overwriting it here was
+          # clobbering Theos's own internal staging path, which broke
+          # its SDK auto-detection in before-all ("You do not have any
+          # SDKs in .../theos/sdks", even though the SDK was right
+          # there). Use a distinct name and consume it as SDK_ROOT in
+          # the app Makefile instead.
+          SDK_ROOT="$THEOS/sdks/iPhoneOS9.3.sdk"
+          mkdir -p "$SDK_ROOT/usr/lib" "$SDK_ROOT/usr/include"
+          cp "$IOS_STAGE"/lib/*.a "$SDK_ROOT/usr/lib/"
+          cp -r "$IOS_STAGE"/include/* "$SDK_ROOT/usr/include/"
+          echo "SDK_ROOT=$SDK_ROOT" >> $GITHUB_ENV
 
       - name: Build .deb + .app via Theos
         env:
@@ -401,7 +406,7 @@ jobs:
           # sdl2-config warnings and missing SDL.h (that makefile has
           # no idea about $(THEOS_STAGING_DIR)). Force the correct file.
           make -f Makefile clean
-          make -f Makefile package FINALPACKAGE=1
+          make -f Makefile package FINALPACKAGE=1 SDK_ROOT="$SDK_ROOT"
           ls -la packages
 
       - name: Pack .ipa from staged .app
