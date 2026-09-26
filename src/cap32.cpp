@@ -2788,6 +2788,26 @@ int cap32_main (int argc, char **argv)
    }
    parseArguments(argc, argv, slot_list, args);
 
+   // Force the OpenGLES2 render driver rather than letting SDL2
+   // auto-select one. SDL2's UIKit backend (compiled against an iOS
+   // 9.3+ SDK where Metal already existed) probes/prefers a Metal
+   // SDL_RenderDriver if one is registered, but Metal itself requires
+   // an Apple A7 or later GPU (iOS 8+). Every armv7-only device this
+   // build targets (iPad 2/3/4/mini 1, iPhone 4s) has an A5/A5X/A6
+   // chip - Metal.framework's own symbols still link fine (they're
+   // just extern declarations resolved by the real system framework
+   // at runtime), but actually creating a Metal-backed SDL_Renderer
+   // on this hardware crashes immediately, which lines up with the
+   // observed "splash appears for a second, then crash, no log"
+   // behaviour: UIKit's launch sequence (SDL_uikitappdelegate.m)
+   // succeeds and shows the window, then video_init() -> direct_init()
+   // -> SDL_CreateWindowAndRenderer() picks Metal and aborts before
+   // cap32_main() gets far enough to emit any of its own fprintf
+   // diagnostics. Setting this hint before SDL_Init() makes SDL2 skip
+   // straight to the "opengles2" driver, which is what every one of
+   // these chips actually supports.
+   SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengles2");
+
    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER | SDL_INIT_NOPARACHUTE) < 0) { // initialize SDL
       fprintf(stderr, "SDL_Init() failed: %s\n", SDL_GetError());
       exit(-1);
