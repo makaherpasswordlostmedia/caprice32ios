@@ -92,7 +92,7 @@ Caprice32ARMv7_LDFLAGS = \
 Caprice32ARMv7_CODESIGN_FLAGS = -Sentitlements.plist
 
 Caprice32ARMv7_PLIST = Resources/Info.plist
-Caprice32ARMv7_RESOURCE_FILES = Resources/LaunchScreen.storyboard Resources/cap32.cfg $(wildcard roms/*)
+Caprice32ARMv7_RESOURCE_FILES = Resources/LaunchScreen.storyboard Resources/cap32.cfg $(wildcard rom/*)
 
 include $(THEOS_MAKE_PATH)/application.mk
 

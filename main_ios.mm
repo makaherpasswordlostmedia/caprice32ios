@@ -54,7 +54,7 @@
 #include "src/cap32.h"
 
 // ---------------------------------------------------------------------
-// First-run seeding: copy bundled defaults (cap32.cfg, roms/) into the
+// First-run seeding: copy bundled defaults (cap32.cfg, rom/) into the
 // writable Documents directory the first time the app launches. After
 // this, cap32's own config/rom search (which walks $HOME) finds them
 // as if they'd always been there.
@@ -77,16 +77,22 @@ static void SeedWritableSupportFilesIfNeeded(NSString *documentsPath)
         }
     }
 
-    // roms/ directory (OS ROMs required to boot a CPC at all)
-    NSString *destRoms = [documentsPath stringByAppendingPathComponent:@"roms"];
+    // rom/ directory (OS ROMs required to boot a CPC at all). This must
+    // match both the resource-bundling name in Makefile
+    // (Caprice32ARMv7_RESOURCE_FILES) and cap32.cpp's own default
+    // rom_path (appPath + "/rom/", see getConfigurationFilename() /
+    // CPC.rom_path in cap32.cpp) - a name mismatch here means the app
+    // seeds an empty/wrong directory and cap32_main() then fails to
+    // open cpc6128.rom etc. at startup, crashing before any UI shows.
+    NSString *destRoms = [documentsPath stringByAppendingPathComponent:@"rom"];
     BOOL isDir = NO;
     if (![fm fileExistsAtPath:destRoms isDirectory:&isDir] || !isDir) {
-        NSString *srcRoms = [[bundle resourcePath] stringByAppendingPathComponent:@"roms"];
+        NSString *srcRoms = [[bundle resourcePath] stringByAppendingPathComponent:@"rom"];
         if ([fm fileExistsAtPath:srcRoms]) {
             NSError *err = nil;
             [fm copyItemAtPath:srcRoms toPath:destRoms error:&err];
             if (err) {
-                NSLog(@"Caprice32: failed to seed roms/: %@", err);
+                NSLog(@"Caprice32: failed to seed rom/: %@", err);
             }
         }
     }
@@ -112,7 +118,7 @@ int main(int argc, char *argv[])
         // Caprice32 also derives a config search entry from argv[0]'s
         // parent directory (see `binPath` in cap32.cpp) - point that at
         // the bundle's Resources directory, where any bundled
-        // cap32.cfg/roms fallback copy lives read-only.
+        // cap32.cfg/rom fallback copy lives read-only.
         NSString *resourcePath = [[NSBundle mainBundle] resourcePath];
 
         // Build a synthetic argv. iOS gives us no meaningful CLI args;
