@@ -45,12 +45,20 @@ class DevTools {
 #ifndef CAPRICE_NO_WGUI
     std::unique_ptr<CapriceGui> capriceGui;
     std::unique_ptr<CapriceDevToolsView> devToolsView;
-#endif
     bool active = false;
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
     SDL_Texture* texture = nullptr;
     SDL_Surface* surface = nullptr;
+#else
+    // The no-op methods under CAPRICE_NO_WGUI (see devtools.cpp) never
+    // touch an SDL window/renderer/texture/surface - there's nothing
+    // to create or tear down without wGui - so keeping those members
+    // around here just trips -Werror,-Wunused-private-field. `active`
+    // is the only piece of state a no-op DevTools still needs, since
+    // IsActive() is used unconditionally by cap32.cpp's main loop.
+    bool active = false;
+#endif
 };
 
 #endif
