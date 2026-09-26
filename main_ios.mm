@@ -44,6 +44,8 @@
 #include <string>
 #include <cstdlib>
 #include <cstring>
+#include <cstdio>
+#include <unistd.h>
 
 // cap32_main() is a plain C++ function (declared in src/cap32.h,
 // defined in src/cap32.cpp) - it was never given C linkage, so
@@ -65,7 +67,18 @@ static void SeedWritableSupportFilesIfNeeded(NSString *documentsPath)
     NSBundle *bundle = [NSBundle mainBundle];
 
     // cap32.cfg
-    NSString *destCfg = [documentsPath stringByAppendingPathComponent:@"cap32.cfg"];
+    //
+    // IMPORTANT: getConfigurationFilename() in cap32.cpp never checks
+    // "$HOME/cap32.cfg" directly - only "$HOME/.config/cap32.cfg" and
+    // "$HOME/.cap32.cfg" (plus chAppPath/cap32.cfg, which on iOS points
+    // nowhere useful - see chAppPath below). Seeding a plain
+    // "cap32.cfg" here meant NONE of those candidates ever matched, so
+    // the app always fell through to an empty config, which in turn
+    // pointed rom_path at a directory that was never actually seeded.
+    // cap32_main() then failed to open the OS ROMs and crashed before
+    // any UI/log output - exactly the "flash then crash" symptom this
+    // is fixing. Seed to the dotfile name cap32.cpp actually looks for.
+    NSString *destCfg = [documentsPath stringByAppendingPathComponent:@".cap32.cfg"];
     if (![fm fileExistsAtPath:destCfg]) {
         NSString *srcCfg = [bundle pathForResource:@"cap32" ofType:@"cfg"];
         if (srcCfg) {
@@ -98,12 +111,29 @@ static void SeedWritableSupportFilesIfNeeded(NSString *documentsPath)
     }
 }
 
+// Redirect stdout/stderr to a file in Documents. On-device (Springboard)
+// launches have no attached console - anything written to stderr/stdout
+// (all of LOG_ERROR/LOG_WARNING/LOG_INFO and every fprintf(stderr,...) in
+// cap32.cpp) simply vanishes, which is why crashes here produce no visible
+// logs at all. freopen makes those same streams land in a real file.
+static void RedirectStdioToDocuments(NSString *documentsPath)
+{
+    NSString *logPath = [documentsPath stringByAppendingPathComponent:@"caprice32.log"];
+    freopen(logPath.UTF8String, "a", stdout);
+    freopen(logPath.UTF8String, "a", stderr);
+    setvbuf(stdout, nullptr, _IONBF, 0);
+    setvbuf(stderr, nullptr, _IONBF, 0);
+    NSLog(@"Caprice32: logging to %@", logPath);
+}
+
 int main(int argc, char *argv[])
 {
     @autoreleasepool {
         NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
                                                               NSUserDomainMask, YES);
         NSString *documentsPath = paths.firstObject;
+
+        RedirectStdioToDocuments(documentsPath);
 
         SeedWritableSupportFilesIfNeeded(documentsPath);
 
@@ -114,6 +144,17 @@ int main(int argc, char *argv[])
         // that's visible from Files.app (if the app enables document
         // sharing) and survives app updates.
         setenv("HOME", documentsPath.UTF8String, 1);
+
+        // cap32_main() falls back to getcwd() for chAppPath (used as
+        // the default base for rom_path/dsk_path/snap_path/etc. when
+        // the config doesn't override them). On iOS the process's cwd
+        // is not Documents and is not guaranteed to be anything
+        // sane/writable, so force it to Documents explicitly - this is
+        // the same directory SeedWritableSupportFilesIfNeeded() just
+        // populated with rom/, so the defaults actually resolve to
+        // real, seeded files instead of a directory that was never
+        // created.
+        chdir(documentsPath.UTF8String);
 
         // Caprice32 also derives a config search entry from argv[0]'s
         // parent directory (see `binPath` in cap32.cpp) - point that at
