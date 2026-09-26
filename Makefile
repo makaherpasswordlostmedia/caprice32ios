@@ -23,6 +23,12 @@ Caprice32ARMv7_FILES += main_ios.mm AppDelegate.mm
 # to the SDK path, and overwriting it breaks Theos's SDK auto-detection.
 SDK_ROOT ?= $(THEOS)/sdks/iPhoneOS9.3.sdk
 
+# ADDITIONAL_CFLAGS is appended last on Theos's actual compile command
+# line (after internal target flags), so this wins even if Theos's own
+# darwin_head.mk implicitly adds -fmodules for this Apple-style iphone
+# target ahead of our instance _CFLAGS above.
+ADDITIONAL_CFLAGS += -fno-modules -fno-cxx-modules -fno-implicit-modules -fno-implicit-module-maps
+
 Caprice32ARMv7_CFLAGS = \
 	-Isrc \
 	-Isrc/capsimg/LibIPF -Isrc/capsimg/Device -Isrc/capsimg/CAPSImg \
@@ -30,7 +36,7 @@ Caprice32ARMv7_CFLAGS = \
 	-I$(SDK_ROOT)/usr/include \
 	-I$(SDK_ROOT)/usr/include/SDL2 \
 	-I$(SDK_ROOT)/usr/include/freetype2 \
-	-fno-modules -fno-cxx-modules \
+	-fno-modules -fno-cxx-modules -fno-implicit-modules -fno-implicit-module-maps \
 	-DNDEBUG
 
 Caprice32ARMv7_CXXFLAGS = $(Caprice32ARMv7_CFLAGS) -std=gnu++17
