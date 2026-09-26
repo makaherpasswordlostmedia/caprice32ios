@@ -3,6 +3,11 @@
 #include <string>
 #include "log.h"
 #include "video.h"
+
+// See devtools.h for why this is stubbed on iOS: the wGui debugger UI
+// (src/gui/) isn't built for the iOS target, so DevTools becomes an
+// inert no-op class here instead of pulling that whole toolkit in.
+#ifndef CAPRICE_NO_WGUI
 #include "wg_error.h"
 
 bool DevTools::Activate(int scale) {
@@ -60,3 +65,26 @@ void DevTools::PostUpdate() {
 bool DevTools::PassEvent(SDL_Event& event) {
   return capriceGui->ProcessEvent(event);
 }
+
+#else  // CAPRICE_NO_WGUI
+
+bool DevTools::Activate(int /*scale*/) {
+  LOG_ERROR("Developer's tools are not available on this platform.");
+  return false;
+}
+
+void DevTools::Deactivate() {
+  active = false;
+}
+
+void DevTools::LoadSymbols(const std::string& /*filename*/) {}
+
+void DevTools::PreUpdate() {}
+
+void DevTools::PostUpdate() {}
+
+bool DevTools::PassEvent(SDL_Event& /*event*/) {
+  return false;
+}
+
+#endif  // CAPRICE_NO_WGUI

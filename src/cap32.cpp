@@ -50,11 +50,15 @@
 #include <errno.h>
 #include <cstring>
 
+// wGui (src/gui/) is desktop-only debugger/menu UI, not built for
+// iOS - see CAPRICE_NO_WGUI usages below for the guarded call sites.
+#ifndef CAPRICE_NO_WGUI
 #include "wg_error.h"
 #include "CapriceGui.h"
 #include "CapriceGuiView.h"
 #include "CapriceVKeyboardView.h"
 #include "CapriceLeavingWithoutSavingView.h"
+#endif
 
 #include "errors.h"
 #include "log.h"
@@ -2026,6 +2030,7 @@ void cleanupShowUI(SDL_Surface* guiBackSurface)
    SDL_SetRelativeMouseMode(SDL_bool(CPC.joystick_emulation == JoystickEmulation::Mouse));
 }
 
+#ifndef CAPRICE_NO_WGUI
 bool userConfirmsQuitWithoutSaving()
 {
    auto guiBackSurface = prepareShowUI();
@@ -2097,6 +2102,34 @@ void showGui()
    }
    cleanupShowUI(guiBackSurface);
 }
+
+#else  // CAPRICE_NO_WGUI
+// iOS doesn't build the wGui debugger/menu UI (src/gui/) - it's a
+// desktop mouse-and-keyboard widget toolkit that was never ported to
+// touch input. These three entry points stay real, callable functions
+// (every call site elsewhere in this file is unchanged) but do
+// nothing beyond the show/cleanup bookkeeping that's independent of
+// wGui.
+bool userConfirmsQuitWithoutSaving()
+{
+   auto guiBackSurface = prepareShowUI();
+   cleanupShowUI(guiBackSurface);
+   return true;
+}
+
+void showVKeyboard()
+{
+   auto guiBackSurface = prepareShowUI();
+   cleanupShowUI(guiBackSurface);
+}
+
+void showGui()
+{
+   auto guiBackSurface = prepareShowUI();
+   cleanupShowUI(guiBackSurface);
+}
+
+#endif  // CAPRICE_NO_WGUI
 
 // TODO: Dedupe with the version in CapriceDevTools
 // TODO: Support watchpoints too
