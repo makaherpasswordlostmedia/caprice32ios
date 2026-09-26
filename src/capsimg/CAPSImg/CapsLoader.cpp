@@ -4,15 +4,15 @@
 
 // valid chunks
 CCapsLoader::ChunkType CCapsLoader::chunklist[]= {
-	CAPS_IDFILE, ccidFile,
-	CAPS_IDDUMP, ccidDump,
-	CAPS_IDDATA, ccidData,
-	CAPS_IDTRCK, ccidTrck,
-	CAPS_IDINFO, ccidInfo,
-	CAPS_IDIMGE, ccidImge,
-	CAPS_IDCTEX, ccidCtex,
-	CAPS_IDCTEI, ccidCtei,
-	NULL, ccidUnknown
+	{CAPS_IDFILE, ccidFile},
+	{CAPS_IDDUMP, ccidDump},
+	{CAPS_IDDATA, ccidData},
+	{CAPS_IDTRCK, ccidTrck},
+	{CAPS_IDINFO, ccidInfo},
+	{CAPS_IDIMGE, ccidImge},
+	{CAPS_IDCTEX, ccidCtex},
+	{CAPS_IDCTEI, ccidCtei},
+	{NULL, ccidUnknown}
 };
 
 
