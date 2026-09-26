@@ -263,10 +263,21 @@ jobs:
           # This mirrors upstream's own Xcode-iOS/SDL/SDL.xcodeproj group
           # structure (confirmed against project.pbxproj) rather than
           # guessing at a file list.
-          git clone --branch SDL2 --depth 1 https://github.com/libsdl-org/SDL.git /tmp/sdl2
+          # Pinned to release-2.0.9, NOT branch HEAD. Later SDL2 commits
+          # (~2.0.10+) added AVAudioSession options that only exist on
+          # iOS 10+ SDKs (AllowBluetoothA2DP, AllowAirPlay, and the
+          # setCategory:mode:options:error: selector), which fail to
+          # compile against this iOS 9.3 SDK with "undeclared identifier"
+          # errors. 2.0.9 predates that coreaudio rewrite and targets
+          # the deployment era this SDK actually supports.
+          git clone --branch release-2.0.9 --depth 1 https://github.com/libsdl-org/SDL.git /tmp/sdl2
           cd /tmp/sdl2
 
-          IOS_CFLAGS="$IOS_TARGET_FLAGS -fobjc-arc -DSDL_VIDEO_RENDER_OGL_ES=0 -DSDL_VIDEO_RENDER_OGL_ES2=1 -DGL_SILENCE_DEPRECATION -Iinclude -I."
+          # iPad mini 1 is an A5 chip - Metal requires A7+, so this
+          # device cannot use Metal at all. Force GLES2 as the renderer
+          # and explicitly disable Metal so SDL never attempts to
+          # compile or select it, even accidentally.
+          IOS_CFLAGS="$IOS_TARGET_FLAGS -fobjc-arc -DSDL_VIDEO_RENDER_OGL_ES=0 -DSDL_VIDEO_RENDER_OGL_ES2=1 -DSDL_VIDEO_RENDER_METAL=0 -DGL_SILENCE_DEPRECATION -Iinclude -I."
 
           SRC_DIRS="src src/audio src/audio/coreaudio src/audio/disk src/audio/dummy \
             src/atomic src/cpuinfo src/dynapi src/events src/file src/haptic src/haptic/dummy \
@@ -284,6 +295,12 @@ jobs:
             [ -d "$d" ] || continue
             for f in "$d"/*.c "$d"/*.m; do
               [ -f "$f" ] || continue
+              # Skip any Metal source outright - target device (A5) has
+              # no Metal support, and these files may pull in MetalKit
+              # headers the iOS 9.3 SDK doesn't fully carry anyway.
+              case "$(basename "$f")" in
+                *metal*|*Metal*) echo "Skipping Metal source: $f"; continue ;;
+              esac
               base="$(echo "$f" | tr '/' '_')"
               obj="$OBJDIR/${base%.*}.o"
               echo "Compiling $f"
