@@ -18,6 +18,8 @@
 #include "CapsLib.h"
 #include <string>
 #include <memory>
+#include <unistd.h>
+#include <cstdlib>
 
 extern t_CPC CPC;
 
@@ -312,16 +314,36 @@ int ipf_load (FILE *pfileIn, t_drive *drive)
   char *tmpFilePath = nullptr;
   std::vector<std::string> prefixes = { "/tmp", "." };
   for (const auto &prefix : prefixes) {
-    tmpFilePath = tempnam(prefix.c_str(), ".cap32_tmp_");
+    // mkstemp() replaces tempnam(): it creates AND opens the file in one
+    // atomic step (no race between name generation and open), and needs
+    // a writable template ending in "XXXXXX" that it fills in with a
+    // unique name. free()'d further down like tempnam()'s result was.
+    std::string tmpl = prefix + "/.cap32_tmp_XXXXXX";
+    tmpFilePath = strdup(tmpl.c_str());
     if (tmpFilePath == nullptr) {
       LOG_ERROR("Couldn't load IPF file: Couldn't generate temporary file name: " << strerror(errno));
       return ERR_DSK_INVALID; // couldn't create output file
     }
+    int fd = mkstemp(tmpFilePath);
+    if (fd == -1) {
+      LOG_ERROR("Couldn't create temporary file at " << tmpFilePath << ": " << strerror(errno));
+      free(tmpFilePath);
+      tmpFilePath = nullptr;
+      continue;
+    }
     LOG_DEBUG("Using temporary file: " << tmpFilePath);
-    pfileOut = fopen(tmpFilePath, "w+b");
+    pfileOut = fdopen(fd, "w+b");
     if (pfileOut != nullptr) {
       break;
     }
+    close(fd);
+    free(tmpFilePath);
+    tmpFilePath = nullptr;
+  }
+
+  if (pfileOut == nullptr) {
+    LOG_ERROR("Couldn't load IPF file: Couldn't open any temporary file for writing: " << strerror(errno));
+    return ERR_DSK_INVALID; // couldn't create output file
   }
 
   if (!file_copy(pfileIn, pfileOut)) {
