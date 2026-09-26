@@ -207,32 +207,6 @@ jobs:
           done
           find "$THEOS/toolchain/linux/iphone" -name '__config_site'
 
-          echo "----- compiler-rt builtins available in this toolchain -----"
-          find "$THEOS/toolchain/linux/iphone" -iname '*clang_rt*' -o -iname '*builtins*' 2>/dev/null
-
-      - name: Locate compiler-rt builtins archive
-        env:
-          THEOS: ${{ github.workspace }}/theos
-        run: |
-          # ___isPlatformVersionAtLeast (SDL2's UIKit backend) lives in
-          # this toolchain's compiler-rt builtins archive. Its exact
-          # name/path varies by toolchain build, so find it here and
-          # export both the full path (for CLANG_RT_IOS_LIB, passed
-          # straight to the linker) and its directory (in case a
-          # -L flag is needed too) rather than hardcoding a guess in
-          # the Makefile.
-          RT_LIB="$(find "$THEOS/toolchain" -iname '*clang_rt.builtins*ios*.a' -o -iname '*clang_rt.ios*.a' 2>/dev/null | head -1)"
-          if [ -z "$RT_LIB" ]; then
-            RT_LIB="$(find "$THEOS/toolchain" -iname 'libclang_rt.*.a' 2>/dev/null | grep -i ios | head -1)"
-          fi
-          if [ -z "$RT_LIB" ]; then
-            echo "::warning::No compiler-rt builtins archive found for iOS armv7 - ___isPlatformVersionAtLeast will stay unresolved unless SDL2 avoids that call path."
-            echo "CLANG_RT_IOS_LIB=" >> $GITHUB_ENV
-          else
-            echo "Found compiler-rt builtins: $RT_LIB"
-            echo "CLANG_RT_IOS_LIB=$RT_LIB" >> $GITHUB_ENV
-          fi
-
       - name: Install iPhoneOS 9.3 SDK
         env:
           THEOS: ${{ github.workspace }}/theos
@@ -597,7 +571,7 @@ jobs:
           # sdl2-config warnings and missing SDL.h (that makefile has
           # no idea about $(THEOS_STAGING_DIR)). Force the correct file.
           make -f Makefile clean
-          make -f Makefile package FINALPACKAGE=1 SDK_ROOT="$SDK_ROOT" CLANG_RT_IOS_LIB="$CLANG_RT_IOS_LIB" V=1 VERBOSE=1
+          make -f Makefile package FINALPACKAGE=1 SDK_ROOT="$SDK_ROOT" V=1 VERBOSE=1
           ls -la packages
 
       - name: Pack .ipa from staged .app
