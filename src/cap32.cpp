@@ -2837,12 +2837,15 @@ int cap32_main (int argc, char **argv)
 
    z80_init_tables(); // init Z80 emulation
 
+   fprintf(stderr, "TRACE: before video_init\n"); fflush(stderr);
    if (video_init()) {
       fprintf(stderr, "video_init() failed. Aborting.\n");
       cleanExit(-1);
    }
+   fprintf(stderr, "TRACE: after video_init, before mouse_init\n"); fflush(stderr);
    mouse_init();
 
+   fprintf(stderr, "TRACE: after mouse_init, before audio_init\n"); fflush(stderr);
    if (audio_init()) {
       fprintf(stderr, "audio_init() failed. Disabling sound.\n");
       // TODO(cpitrat): Do not set this to 0 when audio_init fail as this affect
@@ -2851,10 +2854,12 @@ int cap32_main (int argc, char **argv)
       // To test it, set SDL_AUDIODRIVER=dsp or some other unsupported value.
       CPC.snd_enabled = 0; // disable sound emulation
    }
+   fprintf(stderr, "TRACE: after audio_init, before joysticks_init\n"); fflush(stderr);
 
    if (joysticks_init()) {
       fprintf(stderr, "joysticks_init() failed. Joysticks won't work.\n");
    }
+   fprintf(stderr, "TRACE: after joysticks_init, before fillSlots\n"); fflush(stderr);
 
 #ifdef DEBUG
    pfoDebug = fopen("./debug.txt", "wt");
@@ -2862,9 +2867,11 @@ int cap32_main (int argc, char **argv)
 
    // Extract files to be loaded from the command line args
    fillSlots(slot_list, CPC);
+   fprintf(stderr, "TRACE: after fillSlots, before InputMapper\n"); fflush(stderr);
 
    // Must be done before emulator_init()
    CPC.InputMapper = new InputMapper(&CPC);
+   fprintf(stderr, "TRACE: after InputMapper, before emulator_init\n"); fflush(stderr);
 
    // emulator_init must be called before loading files as they require
    // pbGPBuffer to be initialized.
@@ -2872,9 +2879,11 @@ int cap32_main (int argc, char **argv)
       fprintf(stderr, "emulator_init() failed. Aborting.\n");
       cleanExit(-1);
    }
+   fprintf(stderr, "TRACE: after emulator_init, before loadSlots\n"); fflush(stderr);
 
    // Really load the various drives, if needed
    loadSlots();
+   fprintf(stderr, "TRACE: after loadSlots, before StringToEvents\n"); fflush(stderr);
 
    // Fill the buffer with autocmd if provided
    virtualKeyboardEvents = CPC.InputMapper->StringToEvents(args.autocmd);
@@ -2883,10 +2892,14 @@ int cap32_main (int argc, char **argv)
 
 // ----------------------------------------------------------------------------
 
+   fprintf(stderr, "TRACE: before update_timings\n"); fflush(stderr);
    update_timings();
+   fprintf(stderr, "TRACE: after update_timings, before audio_resume\n"); fflush(stderr);
    audio_resume();
+   fprintf(stderr, "TRACE: after audio_resume, before loadBreakpoints\n"); fflush(stderr);
 
    loadBreakpoints();
+   fprintf(stderr, "TRACE: after loadBreakpoints, entering main loop\n"); fflush(stderr);
 
    iExitCondition = EC_FRAME_COMPLETE;
 
