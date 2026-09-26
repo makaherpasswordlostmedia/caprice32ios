@@ -1,0 +1,277 @@
+name: Build iOS .ipa (armv7, iOS 9.3)
+
+# Cross-compiles Caprice32 (Amstrad CPC emulator, SDL2-based) for 32-bit
+# iOS 9.3 with Theos + clang on ubuntu-latest. No Xcode / no Mac runner
+# required. Pipeline structure adapted from a Theos-based armv7 CI used
+# for other SDL/UIKit ports targeting the same legacy toolchain.
+#
+# Caprice32 links SDL2, freetype2, libpng and zlib. None of these ship
+# with Theos or the bare iOS SDK, so this workflow builds all four from
+# source before the actual app build, since SDL2's own iOS build path
+# (Xcode-iOS/SDL/SDL.xcodeproj, or CMake's CMAKE_OSX_SYSROOT which
+# itself shells out to xcrun) assumes a real Xcode install that this
+# Ubuntu runner doesn't have. Instead we compile SDL2's iOS-relevant
+# source subset directly against the Theos clang cross toolchain,
+# mirroring the file groups in SDL2's own Xcode project (video/uikit,
+# joystick/iphoneos, audio/coreaudio, etc. - see the build step for the
+# full breakdown and reasoning per subsystem).
+
+on:
+  push:
+    branches: [32bit-ios]
+    paths:
+      - "src/**"
+      - "ios/**"
+      - "roms/**"
+      - "control"
+      - "entitlements.plist"
+      - ".github/workflows/ios-build.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "ios/**"
+      - "roms/**"
+      - "control"
+      - "entitlements.plist"
+      - ".github/workflows/ios-build.yml"
+  workflow_dispatch: {}
+
+env:
+  IOS_SDK_VERSION: "9.3"
+
+jobs:
+  build-ios-armv7:
+    name: Build (Theos / iOS 9.3 / armv7)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Identify commit
+        id: commit-info
+        run: |
+          echo "hash=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "date=$(git log -1 --format=%cd --date=short)" >> $GITHUB_OUTPUT
+
+      - name: Install host build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget gnupg lsb-release software-properties-common \
+                                  build-essential perl curl ca-certificates \
+                                  zip unzip xz-utils bzip2 git fakeroot make \
+                                  autoconf automake libtool pkg-config
+
+      - name: Install Theos + iOS cross toolchain
+        env:
+          THEOS: ${{ github.workspace }}/theos
+        run: |
+          git clone --recursive https://github.com/theos/theos.git "$THEOS"
+          # Theos expects the iOS cross compiler at
+          # $THEOS/toolchain/linux/iphone/bin/clang. Grab the Linux->iOS
+          # toolchain release (bundles clang, ld64, cctools, libtapi,
+          # ldid, etc.) which supports the legacy 32-bit ARM ABI.
+          mkdir -p "$THEOS/toolchain/linux/iphone"
+          curl -fsSL \
+            "https://github.com/L1ghtmann/llvm-project/releases/download/main-update_3-eabca92/iOSToolchain-x86_64.tar.xz" \
+            -o /tmp/ios-toolchain.tar.xz
+          tar -xf /tmp/ios-toolchain.tar.xz -C "$THEOS/toolchain"
+          ls "$THEOS/toolchain/linux/iphone/bin" | head -20
+          echo "THEOS=$THEOS" >> $GITHUB_ENV
+
+      - name: Install iPhoneOS 9.3 SDK
+        env:
+          THEOS: ${{ github.workspace }}/theos
+        run: |
+          mkdir -p "$THEOS/sdks"
+          # Community mirror that keeps legacy SDKs with armv7 slices alive.
+          curl -fsSL -o /tmp/iphoneos9.3.sdk.tbz2 \
+            "https://raw.githubusercontent.com/Sn0wCooder/theos-sdks/master/iPhoneOS9.3.sdk.tbz2"
+          tar -xjf /tmp/iphoneos9.3.sdk.tbz2 -C "$THEOS/sdks"
+          ls "$THEOS/sdks"
+
+      - name: Fix legacy module maps in SDK (clang 19)
+        env:
+          THEOS: ${{ github.workspace }}/theos
+        run: |
+          # clang 19 rejects the old 'module.map' name
+          # (-Wdeprecated-module-dot-map) and refuses to build the
+          # Foundation/UIKit modules. Rename to the modern name, as the
+          # compiler itself suggests.
+          SDK="$THEOS/sdks/iPhoneOS9.3.sdk"
+          for fw in "$SDK"/System/Library/Frameworks/*.framework; do
+            if [ -f "$fw/module.map" ]; then
+              mkdir -p "$fw/Modules"
+              mv "$fw/module.map" "$fw/Modules/module.modulemap"
+            fi
+          done
+          find "$SDK/usr/include" -name module.map | while read -r m; do
+            mv "$m" "$(dirname "$m")/module.modulemap"
+          done
+          echo "remaining module.map files:"
+          find "$SDK" -name module.map | wc -l
+
+      - name: Set up cross-compile environment vars
+        env:
+          THEOS: ${{ github.workspace }}/theos
+        run: |
+          echo "IOS_CC=$THEOS/toolchain/linux/iphone/bin/clang" >> $GITHUB_ENV
+          echo "IOS_SYSROOT=$THEOS/sdks/iPhoneOS9.3.sdk" >> $GITHUB_ENV
+          echo "IOS_STAGE=${{ github.workspace }}/theos/vendor" >> $GITHUB_ENV
+
+      - name: Cross-compile zlib for armv7/iOS
+        run: |
+          mkdir -p "$IOS_STAGE"/{lib,include}
+          curl -fsSL -o /tmp/zlib.tar.gz https://zlib.net/fossils/zlib-1.3.1.tar.gz
+          mkdir -p /tmp/zlib && tar -xzf /tmp/zlib.tar.gz -C /tmp/zlib --strip-components=1
+          cd /tmp/zlib
+          CC="$IOS_CC" \
+          CFLAGS="-arch armv7 -isysroot $IOS_SYSROOT -miphoneos-version-min=$IOS_SDK_VERSION" \
+          ./configure --static --prefix=/tmp/zlib-out
+          make -j"$(nproc)"
+          make install
+          cp /tmp/zlib-out/lib/libz.a "$IOS_STAGE/lib/"
+          cp /tmp/zlib-out/include/*.h "$IOS_STAGE/include/"
+
+      - name: Cross-compile libpng for armv7/iOS
+        run: |
+          curl -fsSL -o /tmp/libpng.tar.gz \
+            https://download.sourceforge.net/libpng/libpng-1.6.44.tar.gz
+          mkdir -p /tmp/libpng && tar -xzf /tmp/libpng.tar.gz -C /tmp/libpng --strip-components=1
+          cd /tmp/libpng
+          CC="$IOS_CC" \
+          CFLAGS="-arch armv7 -isysroot $IOS_SYSROOT -miphoneos-version-min=$IOS_SDK_VERSION -I$IOS_STAGE/include" \
+          LDFLAGS="-arch armv7 -isysroot $IOS_SYSROOT -L$IOS_STAGE/lib" \
+          ./configure --host=arm-apple-darwin --disable-shared --enable-static \
+                      --prefix=/tmp/libpng-out
+          make -j"$(nproc)"
+          make install
+          cp /tmp/libpng-out/lib/libpng16.a "$IOS_STAGE/lib/"
+          cp /tmp/libpng-out/include/*.h "$IOS_STAGE/include/"
+
+      - name: Cross-compile SDL2 for armv7/iOS from source
+        env:
+          THEOS: ${{ github.workspace }}/theos
+        run: |
+          # Built straight from libsdl-org/SDL's SDL2 branch (real repo,
+          # not a guessed mirror). SDL2's own iOS build path assumes
+          # Xcode/xcodebuild (Xcode-iOS/SDL/SDL.xcodeproj, or CMake's
+          # CMAKE_OSX_SYSROOT which itself shells out to xcrun) - neither
+          # exists on this Ubuntu runner, only the Theos clang cross
+          # toolchain. So we compile the iOS-relevant source subset
+          # directly, mirroring exactly the source groups Xcode-iOS's own
+          # project.pbxproj builds for the device target:
+          #   - src/*.c                    (core, platform-independent)
+          #   - src/video/uikit/*.m        (UIKit window/view backend)
+          #   - src/video/*.c              (shared video subsystem)
+          #   - src/render/**/*.c          (SDL_Renderer, software + GLES)
+          #   - src/audio/coreaudio/*.c    (CoreAudio backend)
+          #   - src/joystick/iphoneos/*.m  (GameController-backed joystick)
+          #   - src/haptic/dummy/*.c       (iOS has no generic haptic backend pre-CoreHaptics)
+          #   - src/power/uikit/*.m, src/filesystem/cocoa/*.m, src/loadso/dlopen/*.c
+          #   - src/thread/pthread/*.c, src/timer/unix/*.c
+          #   - src/file/*.c, src/events/*.c, src/stdlib/*.c, src/atomic/*.c, src/cpuinfo/*.c
+          #   - src/dynapi/*.c
+          # This mirrors upstream's own Xcode-iOS/SDL/SDL.xcodeproj group
+          # structure (confirmed against project.pbxproj) rather than
+          # guessing at a file list.
+          git clone --branch SDL2 --depth 1 https://github.com/libsdl-org/SDL.git /tmp/sdl2
+          cd /tmp/sdl2
+
+          IOS_CFLAGS="-arch armv7 -isysroot $IOS_SYSROOT -miphoneos-version-min=$IOS_SDK_VERSION -fobjc-arc -DSDL_VIDEO_RENDER_OGL_ES=0 -DSDL_VIDEO_RENDER_OGL_ES2=1 -DGL_SILENCE_DEPRECATION -Iinclude -I."
+
+          SRC_DIRS="src src/audio src/audio/coreaudio src/audio/disk src/audio/dummy \
+            src/atomic src/cpuinfo src/dynapi src/events src/file src/haptic src/haptic/dummy \
+            src/joystick src/joystick/iphoneos src/loadso/dlopen src/power src/power/uikit \
+            src/filesystem/cocoa src/render src/render/software src/render/opengles src/render/opengles2 \
+            src/thread src/thread/pthread src/thread/generic src/timer src/timer/unix \
+            src/stdlib src/libm src/video src/video/uikit src/misc src/misc/unix \
+            src/sensor src/sensor/dummy src/locale src/locale/unix"
+
+          OBJDIR=/tmp/sdl2-obj
+          mkdir -p "$OBJDIR"
+          OBJS=()
+
+          for d in $SRC_DIRS; do
+            [ -d "$d" ] || continue
+            for f in "$d"/*.c "$d"/*.m; do
+              [ -f "$f" ] || continue
+              base="$(echo "$f" | tr '/' '_')"
+              obj="$OBJDIR/${base%.*}.o"
+              echo "Compiling $f"
+              "$IOS_CC" $IOS_CFLAGS -c "$f" -o "$obj"
+              OBJS+=("$obj")
+            done
+          done
+
+          ar rcs "$IOS_STAGE/lib/libSDL2.a" "${OBJS[@]}"
+          mkdir -p "$IOS_STAGE/include/SDL2"
+          cp include/*.h "$IOS_STAGE/include/SDL2/"
+          echo "libSDL2.a built: $(du -h "$IOS_STAGE/lib/libSDL2.a")"
+
+      - name: Cross-compile freetype2 for armv7/iOS
+        run: |
+          curl -fsSL -o /tmp/freetype.tar.gz \
+            "https://download.savannah.gnu.org/releases/freetype/freetype-2.13.2.tar.gz"
+          mkdir -p /tmp/freetypesrc && tar -xzf /tmp/freetype.tar.gz -C /tmp/freetypesrc --strip-components=1
+          cd /tmp/freetypesrc
+          CC="$IOS_CC" \
+          CFLAGS="-arch armv7 -isysroot $IOS_SYSROOT -miphoneos-version-min=$IOS_SDK_VERSION" \
+          LDFLAGS="-arch armv7 -isysroot $IOS_SYSROOT" \
+          ./configure --host=arm-apple-darwin --disable-shared --enable-static \
+                      --without-harfbuzz --without-bzip2 --without-brotli \
+                      --with-zlib=no --with-png=no \
+                      --prefix=/tmp/freetype-out
+          make -j"$(nproc)"
+          make install
+          cp /tmp/freetype-out/lib/libfreetype.a "$IOS_STAGE/lib/"
+          mkdir -p "$IOS_STAGE/include/freetype2"
+          cp -r /tmp/freetype-out/include/freetype2/* "$IOS_STAGE/include/freetype2/"
+          echo "libfreetype.a built: $(du -h "$IOS_STAGE/lib/libfreetype.a")"
+
+      - name: Stage libs into Theos SDK lib dir
+        run: |
+          # Theos' TARGET=iphone:clang:9.3:9.3 looks for extra libs under
+          # the SDK's usr/lib by default via -L flags in the Makefile
+          # (see Caprice32ARMv7_LDFLAGS -> $(THEOS_STAGING_DIR)/usr/lib).
+          THEOS_STAGING_DIR="$THEOS/sdks/iPhoneOS9.3.sdk"
+          mkdir -p "$THEOS_STAGING_DIR/usr/lib" "$THEOS_STAGING_DIR/usr/include"
+          cp "$IOS_STAGE"/lib/*.a "$THEOS_STAGING_DIR/usr/lib/"
+          cp -r "$IOS_STAGE"/include/* "$THEOS_STAGING_DIR/usr/include/"
+          echo "THEOS_STAGING_DIR=$THEOS_STAGING_DIR" >> $GITHUB_ENV
+
+      - name: Build .deb + .app via Theos
+        env:
+          THEOS: ${{ github.workspace }}/theos
+          FINALPACKAGE: "1"
+        run: |
+          make clean
+          make package FINALPACKAGE=1
+          ls -la packages
+
+      - name: Pack .ipa from staged .app
+        run: |
+          rm -rf ipa_build
+          mkdir -p ipa_build/Payload
+          APP_DIR=".theos/obj/Caprice32ARMv7.app"
+          if [ ! -d "$APP_DIR" ]; then
+            APP_DIR=".theos/obj/armv7/Caprice32ARMv7.app"
+          fi
+          if [ ! -d "$APP_DIR" ]; then
+            APP_DIR="$(find .theos -type d -name 'Caprice32ARMv7.app' | head -n1)"
+          fi
+          echo "Using APP_DIR=$APP_DIR"
+          cp -a "$APP_DIR" ipa_build/Payload/
+          (cd ipa_build && zip -rq ../packages/Caprice32-${{ steps.commit-info.outputs.hash }}-armv7-iOS9.3.ipa Payload)
+          ls -la packages
+
+      - name: Upload .ipa + .deb artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Caprice32-armv7-iOS9.3-${{ steps.commit-info.outputs.hash }}
+          path: |
+            packages/*.ipa
+            packages/*.deb
+          if-no-files-found: error
+          retention-days: 30
