@@ -14,13 +14,22 @@ APPLICATION_NAME = Caprice32ARMv7
 Caprice32ARMv7_FILES = $(filter-out src/gui/%,$(wildcard src/*.cpp src/capsimg/*/*.cpp))
 Caprice32ARMv7_FILES += main_ios.mm AppDelegate.mm
 
+# SDK_ROOT is passed in from the workflow (see
+# .github/workflows/ios-build.yml, "Stage libs into Theos SDK lib dir").
+# It points at the iPhoneOS9.3.sdk directory where our cross-compiled
+# SDL2/freetype2/libpng/zlib were staged under usr/lib and usr/include.
+# Deliberately NOT using THEOS_STAGING_DIR here - that's a reserved
+# Theos system variable for its own package staging output, unrelated
+# to the SDK path, and overwriting it breaks Theos's SDK auto-detection.
+SDK_ROOT ?= $(THEOS)/sdks/iPhoneOS9.3.sdk
+
 Caprice32ARMv7_CFLAGS = \
 	-Isrc \
 	-Isrc/capsimg/LibIPF -Isrc/capsimg/Device -Isrc/capsimg/CAPSImg \
 	-Isrc/capsimg/Codec -Isrc/capsimg/Core \
-	-I$(THEOS_STAGING_DIR)/usr/include \
-	-I$(THEOS_STAGING_DIR)/usr/include/SDL2 \
-	-I$(THEOS_STAGING_DIR)/usr/include/freetype2 \
+	-I$(SDK_ROOT)/usr/include \
+	-I$(SDK_ROOT)/usr/include/SDL2 \
+	-I$(SDK_ROOT)/usr/include/freetype2 \
 	-DNDEBUG
 
 Caprice32ARMv7_CXXFLAGS = $(Caprice32ARMv7_CFLAGS) -std=gnu++17
@@ -28,9 +37,9 @@ Caprice32ARMv7_CXXFLAGS = $(Caprice32ARMv7_CFLAGS) -std=gnu++17
 # Static libs staged into $THEOS/vendor/lib/armv7 by the CI steps
 # (two cross-compiled from source: zlib, libpng; two prebuilt: SDL2,
 # freetype2 - see .github/workflows/ios-build.yml for how each lands
-# in $(THEOS_STAGING_DIR)/usr/lib).
+# in $(SDK_ROOT)/usr/lib).
 Caprice32ARMv7_LDFLAGS = \
-	-L$(THEOS_STAGING_DIR)/usr/lib \
+	-L$(SDK_ROOT)/usr/lib \
 	-lSDL2 -lfreetype -lpng16 -lz \
 	-framework UIKit \
 	-framework Foundation \
