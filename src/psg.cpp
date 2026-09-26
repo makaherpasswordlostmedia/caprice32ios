@@ -724,12 +724,12 @@ void ResetAYChipEmulation()
 
 void InitAYCounterVars()
 {
-   CPC.snd_cycle_count_init.both = static_cast<int64_t>(rint((4000000 * ((CPC.speed * 25) / 100.0)) /
-      freq_table[CPC.snd_playback_rate] * 4294967296.0)); // number of Z80 cycles per sample
+   CPC.set_snd_cycle_count_init_both(static_cast<int64_t>(rint((4000000 * ((CPC.speed * 25) / 100.0)) /
+      freq_table[CPC.snd_playback_rate] * 4294967296.0))); // number of Z80 cycles per sample
    LoopCountInit = static_cast<int64_t>(rint(1000000.0 / (4000000.0 * ((CPC.speed * 25) / 100.0)) / 8.0 *
-      CPC.snd_cycle_count_init.both)); // number of AY counter increments per sample
+      CPC.snd_cycle_count_init_both())); // number of AY counter increments per sample
    LOG_INFO("Timing: CPC.speed: " << CPC.speed << " - freq: " << freq_table[CPC.snd_playback_rate]);
-   LOG_INFO("Timing: z80 cycles per sample: " << CPC.snd_cycle_count_init.both/4294967296.0 << " - LoopCountInit: " << LoopCountInit/4294967296.0);
+   LOG_INFO("Timing: z80 cycles per sample: " << CPC.snd_cycle_count_init_both()/4294967296.0 << " - LoopCountInit: " << LoopCountInit/4294967296.0);
    LoopCount.Re = LoopCountInit;
 }
 

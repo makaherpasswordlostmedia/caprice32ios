@@ -384,7 +384,7 @@ void z80_write_mem(word addr, byte val) {
       if (CPC.snd_enabled) { \
          PSG.cycle_count.high += iCycleCount; \
          if (PSG.cycle_count.high >= CPC.snd_cycle_count_init.high) { \
-            PSG.cycle_count.both -= CPC.snd_cycle_count_init.both; \
+            PSG.set_cycle_count_both(PSG.cycle_count_both() - CPC.snd_cycle_count_init_both()); \
             PSG.Synthesizer(); \
          } \
       } \

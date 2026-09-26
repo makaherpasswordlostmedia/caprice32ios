@@ -260,13 +260,29 @@ class t_CPC {
    unsigned int snd_pp_device;
    unsigned int snd_buffersize;
    unsigned char *snd_bufferptr;
-   union {
-      struct {
-         unsigned int low;
-         unsigned int high;
-      };
-      int64_t both;
+   // NOTE: this must not be a union of {unsigned int low, high;} with
+   // int64_t both;. A union containing an int64_t member is itself
+   // 8-byte aligned only if the compiler happens to place it that way;
+   // t_CPC is a non-POD class (it has std::string members earlier in
+   // its layout), so the offset of this field is not guaranteed to be
+   // a multiple of 8 across ABIs/compilers. On ARMv7 (32-bit iOS),
+   // unaligned 64-bit loads/stores fault with SIGBUS
+   // (EXC_ARM_DA_ALIGN) instead of silently working the way x86 does.
+   // Keeping `low`/`high` as plain fields and reading/writing the
+   // 64-bit view via memcpy (which never requires alignment) avoids
+   // this entirely, independent of where the struct ends up in memory.
+   struct {
+      unsigned int low;
+      unsigned int high;
    } snd_cycle_count_init;
+   int64_t snd_cycle_count_init_both() const {
+      int64_t v;
+      memcpy(&v, &snd_cycle_count_init, sizeof(v));
+      return v;
+   }
+   void set_snd_cycle_count_init_both(int64_t v) {
+      memcpy(&snd_cycle_count_init, &v, sizeof(v));
+   }
 
    std::string kbd_layout;
 
@@ -382,13 +398,22 @@ typedef struct {
 } t_PPI;
 
 typedef struct {
-   union {
-      struct {
-         unsigned int low;
-         unsigned int high;
-      };
-      int64_t both;
+   // See the comment on t_CPC::snd_cycle_count_init above: this used
+   // to be a union with an int64_t member, which faults with SIGBUS
+   // (EXC_ARM_DA_ALIGN) on ARMv7 whenever this struct isn't 8-byte
+   // aligned in memory. Plain fields + memcpy accessors avoid that.
+   struct {
+      unsigned int low;
+      unsigned int high;
    } cycle_count;
+   int64_t cycle_count_both() const {
+      int64_t v;
+      memcpy(&v, &cycle_count, sizeof(v));
+      return v;
+   }
+   void set_cycle_count_both(int64_t v) {
+      memcpy(&cycle_count, &v, sizeof(v));
+   }
    unsigned int buffer_full;
    unsigned char control;
    unsigned char reg_select;
