@@ -476,6 +476,22 @@ jobs:
           "$IOS_AR" rcs "$IOS_STAGE/lib/libSDL2.a" "${OBJS[@]}"
           mkdir -p "$IOS_STAGE/include/SDL2"
           cp include/*.h "$IOS_STAGE/include/SDL2/"
+          # AppDelegate.mm includes SDL_uikitappdelegate.h directly (the
+          # standard pattern for SDL2 iOS app delegates, matching SDL's
+          # own Xcode-iOS/SDL/main/ios/SDL_uikit_main.m usage). That
+          # header - and its siblings like SDL_uikitwindow.h,
+          # SDL_uikitview.h, SDL_uikitviewcontroller.h - lives under
+          # src/video/uikit/, not include/, so the copy above misses it
+          # entirely. Stage the uikit backend's public-ish headers too.
+          cp src/video/uikit/SDL_uikitappdelegate.h \
+             src/video/uikit/SDL_uikitwindow.h \
+             src/video/uikit/SDL_uikitview.h \
+             src/video/uikit/SDL_uikitviewcontroller.h \
+             src/video/uikit/SDL_uikitopenglview.h \
+             src/video/uikit/SDL_uikitmetalview.h \
+             src/video/uikit/SDL_uikitmodes.h \
+             src/video/uikit/SDL_uikitevents.h \
+             "$IOS_STAGE/include/SDL2/" 2>/dev/null || true
           echo "libSDL2.a built: $(du -h "$IOS_STAGE/lib/libSDL2.a")"
 
       - name: Cross-compile freetype2 for armv7/iOS
