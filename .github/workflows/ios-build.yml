@@ -406,7 +406,7 @@ jobs:
           # sdl2-config warnings and missing SDL.h (that makefile has
           # no idea about $(THEOS_STAGING_DIR)). Force the correct file.
           make -f Makefile clean
-          make -f Makefile package FINALPACKAGE=1 SDK_ROOT="$SDK_ROOT"
+          make -f Makefile package FINALPACKAGE=1 SDK_ROOT="$SDK_ROOT" V=1 VERBOSE=1
           ls -la packages
 
       - name: Pack .ipa from staged .app
