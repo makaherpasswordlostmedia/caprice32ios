@@ -70,15 +70,15 @@ Caprice32ARMv7_CXXFLAGS = $(Caprice32ARMv7_CFLAGS) -std=gnu++17
 # (two cross-compiled from source: zlib, libpng; two prebuilt: SDL2,
 # freetype2 - see .github/workflows/ios-build.yml for how each lands
 # in $(SDK_ROOT)/usr/lib).
-# -lclang_rt.ios pulls in compiler-rt builtins for this toolchain
-# (e.g. ___isPlatformVersionAtLeast, used by @available/API-availability
-# checks - SDL2's UIKit backend calls it). Theos's iphone:clang target
-# doesn't always link this implicitly with a bare cross-toolchain, so
-# it's listed explicitly here rather than relying on the driver default.
+# Availability builtin (___isPlatformVersionAtLeast) needed by SDL2's
+# UIKit backend. Resolved via CLANG_RT_IOS_LIB, computed in
+# ios-build.yml from whatever compiler-rt archive this toolchain
+# actually ships (name/location vary by build) - do not hardcode
+# -lclang_rt.ios here, it does not exist in this toolchain release.
 Caprice32ARMv7_LDFLAGS = \
 	-L$(SDK_ROOT)/usr/lib \
 	-lSDL2 -lfreetype -lpng16 -lz \
-	-lclang_rt.ios \
+	$(CLANG_RT_IOS_LIB) \
 	-framework UIKit \
 	-framework Foundation \
 	-framework QuartzCore \
