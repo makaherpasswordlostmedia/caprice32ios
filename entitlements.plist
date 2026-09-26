@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	Minimal entitlements for a standalone .app / .ipa built outside
+	Xcode via Theos + ldid. This is NOT a Mobile Substrate tweak, so it
+	doesn't need com.apple.springboard.debugapplications or similar
+	jailbreak-only entitlements - Caprice32 runs as an ordinary sandboxed
+	app once resigned (ldid or a real Apple signing identity) and
+	installed via ideviceinstaller / Cydia Impactor / AltStore / a
+	developer-mode sideload flow appropriate for iOS 9.3 hardware.
+	-->
+	<key>get-task-allow</key>
+	<true/>
+</dict>
+</plist>
