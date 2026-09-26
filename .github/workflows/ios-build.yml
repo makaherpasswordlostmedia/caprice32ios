@@ -114,11 +114,34 @@ jobs:
           echo "-----------------------------------------"
 
           # Turn #cmakedefine / #cmakedefine01 lines into real #define
-          # (or commented-out #undef) lines. Two macros are explicitly
-          # enabled/set; everything else stays undefined, matching a
-          # standard full-featured Darwin/iOS libc++ build:
-          #   _LIBCPP_ABI_VERSION            -> 1
-          #   _LIBCPP_HAS_THREAD_API_PTHREAD -> defined
+          # (or commented-out #undef) lines, AND resolve the bare
+          # @VAR@-style substitutions this template also contains
+          # (those aren't #cmakedefine lines at all, so a rule that
+          # only handles #cmakedefine leaves literal "@_FOO@" text in
+          # the output - which clang then chokes on as raw
+          # non-preprocessor tokens, "expected unqualified-id").
+          #
+          # Explicit choices made here, matching a standard release
+          # build of libc++ for a Darwin/iOS target:
+          #   _LIBCPP_ABI_VERSION            -> 1        (current ABI)
+          #   _LIBCPP_HAS_THREAD_API_PTHREAD -> defined  (Darwin/iOS use pthreads)
+          #   _LIBCPP_HARDENING_MODE_DEFAULT -> _LIBCPP_HARDENING_MODE_NONE
+          #       (matches upstream's own default for a non-hardened,
+          #       non-debug release build; this __config lists NONE
+          #       first among the four valid values and every other
+          #       Apple-target libc++ ships with this default absent
+          #       an explicit opt-in to hardening)
+          #   Exactly one _LIBCPP_PSTL_CPU_BACKEND_* -> SERIAL
+          #       (the no-extra-dependency default backend; THREAD
+          #       needs libc++'s own thread pool wiring and
+          #       LIBDISPATCH needs Apple's libdispatch, neither of
+          #       which this bare cross-toolchain build sets up)
+          #   @_LIBCPP_ABI_DEFINES@, @_LIBCPP_EXTRA_SITE_DEFINES@ -> blank
+          #       (these are lists of extra #define lines that CMake
+          #       splices in from its own ABI-breaking-change config;
+          #       empty is the correct value for a build enabling no
+          #       non-default ABI flags, which matches everything else
+          #       chosen above)
           awk '
             /^#cmakedefine01[ \t]+_LIBCPP_HAS_THREAD_API_PTHREAD/ {
               print "#define _LIBCPP_HAS_THREAD_API_PTHREAD 1"; next
@@ -132,9 +155,20 @@ jobs:
             /^#cmakedefine[ \t]+_LIBCPP_HAS_THREAD_API_PTHREAD/ {
               print "#define _LIBCPP_HAS_THREAD_API_PTHREAD"; next
             }
+            /^#cmakedefine[ \t]+_LIBCPP_HARDENING_MODE_DEFAULT/ {
+              print "#define _LIBCPP_HARDENING_MODE_DEFAULT _LIBCPP_HARDENING_MODE_NONE"; next
+            }
+            /^#cmakedefine[ \t]+_LIBCPP_PSTL_CPU_BACKEND_SERIAL/ {
+              print "#define _LIBCPP_PSTL_CPU_BACKEND_SERIAL"; next
+            }
+            /^#cmakedefine[ \t]+_LIBCPP_PSTL_CPU_BACKEND_(THREAD|LIBDISPATCH)/ {
+              name=$2; print "/* #undef " name " */"; next
+            }
             /^#cmakedefine[ \t]+/ {
               name=$2; print "/* #undef " name " */"; next
             }
+            /^@_LIBCPP_ABI_DEFINES@$/      { next }
+            /^@_LIBCPP_EXTRA_SITE_DEFINES@$/ { next }
             { print }
           ' /tmp/__config_site.in > /tmp/__config_site
 
