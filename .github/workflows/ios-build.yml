@@ -83,84 +83,60 @@ jobs:
       - name: Fix missing libc++ __config_site
         env:
           THEOS: ${{ github.workspace }}/theos
-          # Exact commit this toolchain release was built from (see the
-          # release tag above: main-update_3-eabca92 -> commit eabca92
-          # in L1ghtmann/llvm-project). We pull __config_site.in from
-          # that specific commit rather than a generic/upstream LLVM
-          # checkout, so the macro set matches what this toolchain's
-          # libc++ was actually compiled against - a wrong or generic
-          # template here would silently change ABI-relevant macros
-          # (thread API, exception/RTTI availability, ABI namespace).
           LLVM_COMMIT: "eabca92"
         run: |
-          # Find where __config_site is expected: check every
-          # __config that references it and use its directory.
+          # This toolchain release (main-update_3-eabca92, built from
+          # commit eabca92 in L1ghtmann/llvm-project) ships libc++'s
+          # headers but not the generated __config_site that CMake
+          # normally produces when libc++ itself is built. Without it,
+          # <__config> (pulled in transitively by nearly every libc++
+          # header) fails immediately with "'__config_site' file not
+          # found". Fetch the real __config_site.in template from that
+          # exact commit and fill it in the way this toolchain's build
+          # actually would: pthreads as the thread API (Darwin/iOS),
+          # Itanium ABI version 1, no feature sets disabled (this
+          # libc++ ships full filesystem/locale/wide-char support).
           CONFIG_DIRS="$(grep -rl '__config_site' \
             "$THEOS/toolchain/linux/iphone/include" 2>/dev/null \
             | xargs -n1 dirname | sort -u)"
           echo "Dirs needing __config_site:"
           echo "$CONFIG_DIRS"
           if [ -z "$CONFIG_DIRS" ]; then
-            echo "No __config referencing __config_site found - nothing to patch, or layout differs than expected."
+            echo "::error::No __config referencing __config_site found - toolchain layout differs from expected."
             exit 1
           fi
 
-          # Fetch the real template + CMakeLists this toolchain build
-          # used, from the exact commit, so the generated macros match
-          # this libc++'s actual ABI instead of a guessed/generic one.
           curl -fsSL \
             "https://raw.githubusercontent.com/L1ghtmann/llvm-project/${LLVM_COMMIT}/libcxx/include/__config_site.in" \
             -o /tmp/__config_site.in
+          echo "----- Template (__config_site.in) -----"
           cat /tmp/__config_site.in
+          echo "-----------------------------------------"
 
-          # Populate the @VAR@ / #cmakedefine slots the same way this
-          # toolchain's build (Linux host, Darwin/iOS target, static
-          # libc++) would: pthreads as the thread API (Darwin/iOS use
-          # pthreads under the hood), Itanium C++ ABI (not Microsoft -
-          # this is an Apple-target build), and no other feature bits
-          # disabled, since this libc++ ships full localization/
-          # filesystem/wide-char support (confirmed by nm-checking the
-          # shipped libc++.a / libc++abi.a for the corresponding
-          # symbols below).
-          python3 - "$LLVM_COMMIT" << 'PYEOF'
-import re, sys
-
-with open("/tmp/__config_site.in") as f:
-    tmpl = f.read()
-
-# Values matching an Apple/iOS-target libc++ build with pthreads,
-# Itanium ABI, ABI version 1, no disabled feature sets.
-defines = {
-    "_LIBCPP_ABI_VERSION": "1",
-}
-# #cmakedefine NAME [@NAME@]  -> keep line (defined) or comment out (undefined)
-enabled = {
-    "_LIBCPP_HAS_THREAD_API_PTHREAD",
-}
-
-out_lines = []
-for line in tmpl.splitlines():
-    m = re.match(r'#cmakedefine01\s+(\w+)', line)
-    if m:
-        name = m.group(1)
-        val = "1" if name in enabled else "0"
-        out_lines.append(f"#define {name} {val}")
-        continue
-    m = re.match(r'#cmakedefine\s+(\w+)(\s+@\w+@)?', line)
-    if m:
-        name = m.group(1)
-        if name in defines:
-            out_lines.append(f"#define {name} {defines[name]}")
-        elif name in enabled:
-            out_lines.append(f"#define {name}")
-        else:
-            out_lines.append(f"/* #undef {name} */")
-        continue
-    out_lines.append(line)
-
-with open("/tmp/__config_site", "w") as f:
-    f.write("\n".join(out_lines) + "\n")
-PYEOF
+          # Turn #cmakedefine / #cmakedefine01 lines into real #define
+          # (or commented-out #undef) lines. Two macros are explicitly
+          # enabled/set; everything else stays undefined, matching a
+          # standard full-featured Darwin/iOS libc++ build:
+          #   _LIBCPP_ABI_VERSION            -> 1
+          #   _LIBCPP_HAS_THREAD_API_PTHREAD -> defined
+          awk '
+            /^#cmakedefine01[ \t]+_LIBCPP_HAS_THREAD_API_PTHREAD/ {
+              print "#define _LIBCPP_HAS_THREAD_API_PTHREAD 1"; next
+            }
+            /^#cmakedefine01[ \t]+/ {
+              name=$2; print "#define " name " 0"; next
+            }
+            /^#cmakedefine[ \t]+_LIBCPP_ABI_VERSION/ {
+              print "#define _LIBCPP_ABI_VERSION 1"; next
+            }
+            /^#cmakedefine[ \t]+_LIBCPP_HAS_THREAD_API_PTHREAD/ {
+              print "#define _LIBCPP_HAS_THREAD_API_PTHREAD"; next
+            }
+            /^#cmakedefine[ \t]+/ {
+              name=$2; print "/* #undef " name " */"; next
+            }
+            { print }
+          ' /tmp/__config_site.in > /tmp/__config_site
 
           echo "----- Generated __config_site -----"
           cat /tmp/__config_site
