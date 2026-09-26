@@ -25,13 +25,33 @@
 // makes sure those environment variables point somewhere sane before
 // cap32_main() runs, so the existing desktop logic "just works".
 
+// SDL2's iOS entry point (src/main/ios/SDL_uikit_main.m) defines the
+// real `main(argc, argv)` itself and calls into UIApplicationMain,
+// which eventually invokes *our* app code on a dedicated thread via
+// the name `SDL_main` (see SDL_main.h, which #defines main to
+// SDL_main after inclusion). Without including SDL_main.h, this file's
+// `int main(...)` below was a second, competing definition of the
+// plain C `main` symbol - harmless to compile, but it meant our code
+// was never the one SDL_uikit_main.m actually called, and conversely
+// left SDL2's own SDL_main() reference unresolved at link time.
+// Including SDL_main.h makes the macro substitution apply to the
+// definition below, so it becomes SDL_main and hooks into SDL's real
+// iOS launch sequence correctly.
+#include <SDL2/SDL_main.h>
+
 #import <Foundation/Foundation.h>
 #include <vector>
 #include <string>
 #include <cstdlib>
 #include <cstring>
 
-extern "C" int cap32_main(int argc, char **argv);
+// cap32_main() is a plain C++ function (declared in src/cap32.h,
+// defined in src/cap32.cpp) - it was never given C linkage, so
+// declaring it extern "C" here made this translation unit look for
+// the linker symbol `_cap32_main` while cap32.cpp actually emits the
+// C++-mangled name. Include the real header instead of hand-declaring
+// a mismatched prototype, so both sides always agree on linkage.
+#include "src/cap32.h"
 
 // ---------------------------------------------------------------------
 // First-run seeding: copy bundled defaults (cap32.cfg, roms/) into the

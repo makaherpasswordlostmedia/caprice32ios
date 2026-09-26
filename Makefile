@@ -7,10 +7,13 @@ include $(THEOS)/makefiles/common.mk
 
 APPLICATION_NAME = Caprice32ARMv7
 
-# --- Caprice32 core sources -------------------------------------------
 # Mirrors the desktop makefile's `find src -name *.cpp` glob, minus
 # main.cpp (replaced by main_ios.mm) and src/gui (wGui debugger UI,
-# not ported - not required for a playable emulator).
+# not ported - not required for a playable emulator). devtools.cpp and
+# the equivalent call sites in cap32.cpp still compile - they're
+# stubbed out under -DCAPRICE_NO_WGUI (see those files) rather than
+# excluded, so DevTools/showGui/etc. stay real, linkable no-ops instead
+# of needing every call site in cap32.cpp's main loop touched.
 Caprice32ARMv7_FILES = $(filter-out src/gui/%,$(wildcard src/*.cpp src/capsimg/*/*.cpp))
 Caprice32ARMv7_FILES += main_ios.mm AppDelegate.mm
 
@@ -59,7 +62,7 @@ Caprice32ARMv7_CFLAGS = \
 	-I$(SDK_ROOT)/usr/include/SDL2 \
 	-I$(SDK_ROOT)/usr/include/freetype2 \
 	-fno-modules -fno-cxx-modules -fno-implicit-modules -fno-implicit-module-maps \
-	-DNDEBUG
+	-DNDEBUG -DCAPRICE_NO_WGUI
 
 Caprice32ARMv7_CXXFLAGS = $(Caprice32ARMv7_CFLAGS) -std=gnu++17
 
