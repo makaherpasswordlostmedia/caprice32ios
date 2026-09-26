@@ -480,8 +480,27 @@ jobs:
 
       - name: Cross-compile freetype2 for armv7/iOS
         run: |
-          curl -fsSL -o /tmp/freetype.tar.gz \
-            "https://download.savannah.gnu.org/releases/freetype/freetype-2.13.2.tar.gz"
+          # savannah.gnu.org occasionally 500s (seen in CI: "curl: (22)
+          # The requested URL returned error: 500") - it's a general
+          # mirror-network flakiness issue, not something wrong with our
+          # request. Retry a few times, and fall back to SourceForge,
+          # which hosts the identical release tarball (it's listed as
+          # freetype's own upstream mirror, e.g. in Homebrew's formula).
+          fetch_freetype() {
+            local url="$1"
+            for attempt in 1 2 3; do
+              curl -fsSL --retry 2 --retry-delay 2 -o /tmp/freetype.tar.gz "$url" && \
+              [ "$(head -c2 /tmp/freetype.tar.gz | xxd -p)" = "1f8b" ] && return 0
+              echo "Attempt $attempt from $url did not yield a valid gzip file, retrying..."
+              sleep 3
+            done
+            return 1
+          }
+
+          fetch_freetype "https://download.savannah.gnu.org/releases/freetype/freetype-2.13.2.tar.gz" \
+            || fetch_freetype "https://downloads.sourceforge.net/project/freetype/freetype2/2.13.2/freetype-2.13.2.tar.gz" \
+            || { echo "::error::Could not download a valid freetype-2.13.2.tar.gz from any source"; exit 1; }
+
           mkdir -p /tmp/freetypesrc && tar -xzf /tmp/freetype.tar.gz -C /tmp/freetypesrc --strip-components=1
           cd /tmp/freetypesrc
           CC="$IOS_CC" \
