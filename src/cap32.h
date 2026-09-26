@@ -397,7 +397,7 @@ typedef struct {
    unsigned char portC;
 } t_PPI;
 
-typedef struct {
+typedef struct t_PSG_tag {
    // See the comment on t_CPC::snd_cycle_count_init above: this used
    // to be a union with an int64_t member, which faults with SIGBUS
    // (EXC_ARM_DA_ALIGN) on ARMv7 whenever this struct isn't 8-byte
