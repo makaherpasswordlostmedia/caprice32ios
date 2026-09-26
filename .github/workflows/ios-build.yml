@@ -18,7 +18,7 @@ name: Build iOS .ipa (armv7, iOS 9.3)
 
 on:
   push:
-    branches: [master]
+    branches: [32bit-ios]
     paths:
       - "src/**"
       - "ios/**"
@@ -120,6 +120,20 @@ jobs:
           echo "IOS_SYSROOT=$THEOS/sdks/iPhoneOS9.3.sdk" >> $GITHUB_ENV
           echo "IOS_STAGE=${{ github.workspace }}/theos/vendor" >> $GITHUB_ENV
 
+          # This clang binary is a vanilla/LLVM.org-style clang (not
+          # Apple's clang), which does NOT understand Apple driver
+          # flags like -arch or -miphoneos-version-min - those only
+          # exist in Apple's own clang fork. A vanilla clang is a
+          # genuine cross-compiler instead: you select the target via
+          # --target=<arch>-apple-ios<version>, which sets the
+          # architecture AND OS/deployment version in one flag, and
+          # -isysroot still works the same way to point at the SDK.
+          # (This is what caused "unsupported option '-arch' for
+          # target 'x86_64-unknown-linux-gnu'" - the compiler was
+          # silently defaulting to a host build because none of our
+          # flags actually selected an iOS target.)
+          echo "IOS_TARGET_FLAGS=--target=armv7-apple-ios${IOS_SDK_VERSION} -isysroot $THEOS/sdks/iPhoneOS9.3.sdk" >> $GITHUB_ENV
+
           # Archiver: prefer llvm-ar bundled next to clang in this
           # toolchain release (standard for L1ghtmann/sbingner-style
           # iOS cross toolchains, which usually ship llvm-ar/llvm-ranlib
@@ -134,6 +148,16 @@ jobs:
             echo "IOS_AR=$(command -v ar)" >> $GITHUB_ENV
           fi
           ls "$TOOLBIN"
+
+          # Sanity check right here, in this step, so a broken target
+          # selection fails fast with a clear message instead of 45
+          # minutes into the workflow inside a library build.
+          echo 'int main(void){return 0;}' > /tmp/target_check.c
+          "$THEOS/toolchain/linux/iphone/bin/clang" \
+            --target=armv7-apple-ios${IOS_SDK_VERSION} \
+            -isysroot "$THEOS/sdks/iPhoneOS9.3.sdk" \
+            -c /tmp/target_check.c -o /tmp/target_check.o
+          file /tmp/target_check.o || true
 
       - name: Cross-compile zlib for armv7/iOS
         run: |
@@ -155,7 +179,7 @@ jobs:
           # that matters for this platform (HAVE_UNISTD_H is really the
           # only one, and iOS has unistd.h), so compile the objects by
           # hand and archive them directly.
-          IOS_ARCH_FLAGS="-arch armv7 -isysroot $IOS_SYSROOT -miphoneos-version-min=$IOS_SDK_VERSION"
+          IOS_ARCH_FLAGS="$IOS_TARGET_FLAGS"
 
           ZLIB_SRCS="adler32 compress crc32 deflate gzclose gzlib gzread gzwrite infback inffast inflate inftrees trees uncompr zutil"
           OBJS=()
@@ -179,8 +203,8 @@ jobs:
           CC="$IOS_CC" \
           AR="$IOS_AR" \
           RANLIB=: \
-          CFLAGS="-arch armv7 -isysroot $IOS_SYSROOT -miphoneos-version-min=$IOS_SDK_VERSION -I$IOS_STAGE/include" \
-          LDFLAGS="-arch armv7 -isysroot $IOS_SYSROOT -L$IOS_STAGE/lib" \
+          CFLAGS="$IOS_TARGET_FLAGS -I$IOS_STAGE/include" \
+          LDFLAGS="$IOS_TARGET_FLAGS -L$IOS_STAGE/lib" \
           ./configure --host=arm-apple-darwin --disable-shared --enable-static \
                       --prefix=/tmp/libpng-out
           make -j"$(nproc)"
@@ -217,7 +241,7 @@ jobs:
           git clone --branch SDL2 --depth 1 https://github.com/libsdl-org/SDL.git /tmp/sdl2
           cd /tmp/sdl2
 
-          IOS_CFLAGS="-arch armv7 -isysroot $IOS_SYSROOT -miphoneos-version-min=$IOS_SDK_VERSION -fobjc-arc -DSDL_VIDEO_RENDER_OGL_ES=0 -DSDL_VIDEO_RENDER_OGL_ES2=1 -DGL_SILENCE_DEPRECATION -Iinclude -I."
+          IOS_CFLAGS="$IOS_TARGET_FLAGS -fobjc-arc -DSDL_VIDEO_RENDER_OGL_ES=0 -DSDL_VIDEO_RENDER_OGL_ES2=1 -DGL_SILENCE_DEPRECATION -Iinclude -I."
 
           SRC_DIRS="src src/audio src/audio/coreaudio src/audio/disk src/audio/dummy \
             src/atomic src/cpuinfo src/dynapi src/events src/file src/haptic src/haptic/dummy \
@@ -257,8 +281,8 @@ jobs:
           CC="$IOS_CC" \
           AR="$IOS_AR" \
           RANLIB=: \
-          CFLAGS="-arch armv7 -isysroot $IOS_SYSROOT -miphoneos-version-min=$IOS_SDK_VERSION" \
-          LDFLAGS="-arch armv7 -isysroot $IOS_SYSROOT" \
+          CFLAGS="$IOS_TARGET_FLAGS" \
+          LDFLAGS="$IOS_TARGET_FLAGS" \
           ./configure --host=arm-apple-darwin --disable-shared --enable-static \
                       --without-harfbuzz --without-bzip2 --without-brotli \
                       --with-zlib=no --with-png=no \
