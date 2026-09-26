@@ -27,7 +27,28 @@ SDK_ROOT ?= $(THEOS)/sdks/iPhoneOS9.3.sdk
 # line (after internal target flags), so this wins even if Theos's own
 # darwin_head.mk implicitly adds -fmodules for this Apple-style iphone
 # target ahead of our instance _CFLAGS above.
-ADDITIONAL_CFLAGS += -fno-modules -fno-cxx-modules -fno-implicit-modules -fno-implicit-module-maps
+#
+# Theos's iphone:clang target enables -Werror by default. SDL2's own
+# SDL_uikitappdelegate.h declares `@property (nonatomic) UIWindow
+# *window;` with no explicit strong/retain/assign - a long-standing
+# upstream SDL2 quirk that's harmless in practice (every real SDL2 iOS
+# build just emits it as a warning) but fails outright under -Werror.
+# Downgrade only these two specific warning classes back to warnings
+# instead of disabling -Werror wholesale.
+ADDITIONAL_CFLAGS += -fno-modules -fno-cxx-modules -fno-implicit-modules -fno-implicit-module-maps \
+	-Wno-error=objc-property-no-attribute -Wno-error=property-attribute-mismatch
+
+# AppDelegate.mm needs the same compat shim the SDL2 build step
+# force-includes when it compiles SDL_uikitappdelegate.m - this iOS 9.3
+# SDK mirror is missing the UIApplicationOpenURLOptionsKey typedef
+# (real iOS 9.0+ API) that AppDelegate.mm's own
+# -application:openURL:options: override references. Theos only
+# compiles this file through its own rules, so the CI-side `-include`
+# used for the SDL2 build never reaches it. Theos's per-file flag
+# syntax is "File.extension_CFLAGS" (see theos.dev/docs/variables,
+# "Local Variables"), which applies to every file matching that
+# name+extension in this project instance.
+AppDelegate.mm_CFLAGS += -include $(THEOS_PROJECT_DIR)/ios93_compat_shim.h
 
 Caprice32ARMv7_CFLAGS = \
 	-Isrc \
