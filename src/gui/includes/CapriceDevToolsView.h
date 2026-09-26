@@ -13,7 +13,7 @@ class DevTools;
 constexpr int DEVTOOLS_WIDTH = 640;
 constexpr int DEVTOOLS_HEIGHT = 480;
 
-class CapriceDevToolsView : public wGui::CView
+class CapriceDevToolsView final : public wGui::CView
 {
   protected:
     wGui::CapriceDevTools *m_pDevToolsFrame;
