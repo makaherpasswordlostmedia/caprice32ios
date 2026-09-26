@@ -46,6 +46,7 @@
 #include "slotshandler.h"
 #include "fileutils.h"
 #include "net4cpc.h"
+#include "symfile.h"
 
 #include <errno.h>
 #include <cstring>
