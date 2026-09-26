@@ -10,12 +10,19 @@
 // widget toolkit. DevTools stays a real, linkable class either way;
 // under CAPRICE_NO_WGUI its guts (defined in devtools.cpp) are just
 // no-ops, so every call site in cap32.cpp's main loop needs no changes.
+//
+// The capriceGui/devToolsView members are only declared under the
+// non-iOS branch below. A forward-declared CapriceGui/CapriceDevToolsView
+// is NOT enough to hold them as unique_ptr members even if the methods
+// that touch the pointers are never called: unique_ptr's destructor
+// needs sizeof(T) at the point DevTools's own destructor is
+// instantiated (which happens wherever std::list<DevTools> is used,
+// i.e. cap32.cpp - nowhere near CapriceGui.h). Omitting the members
+// entirely under CAPRICE_NO_WGUI sidesteps that rather than requiring
+// every TU that ever destroys a DevTools to see the full wGui headers.
 #ifndef CAPRICE_NO_WGUI
 #include "CapriceGui.h"
 #include "CapriceDevToolsView.h"
-#else
-class CapriceGui;
-class CapriceDevToolsView;
 #endif
 
 class DevTools {
@@ -35,8 +42,10 @@ class DevTools {
     bool PassEvent(SDL_Event& e);
 
   private:
+#ifndef CAPRICE_NO_WGUI
     std::unique_ptr<CapriceGui> capriceGui;
     std::unique_ptr<CapriceDevToolsView> devToolsView;
+#endif
     bool active = false;
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
