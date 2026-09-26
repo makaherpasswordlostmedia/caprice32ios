@@ -90,23 +90,44 @@ static void SeedWritableSupportFilesIfNeeded(NSString *documentsPath)
         }
     }
 
-    // rom/ directory (OS ROMs required to boot a CPC at all). This must
-    // match both the resource-bundling name in Makefile
-    // (Caprice32ARMv7_RESOURCE_FILES) and cap32.cpp's own default
-    // rom_path (appPath + "/rom/", see getConfigurationFilename() /
-    // CPC.rom_path in cap32.cpp) - a name mismatch here means the app
-    // seeds an empty/wrong directory and cap32_main() then fails to
-    // open cpc6128.rom etc. at startup, crashing before any UI shows.
+    // rom/ directory (OS ROMs required to boot a CPC at all).
+    //
+    // IMPORTANT: the Makefile bundles ROMs via
+    // `Caprice32ARMv7_RESOURCE_FILES = ... $(wildcard rom/*)`, which
+    // copies each ROM file individually into the app bundle's
+    // Resources ROOT (Resources/cpc6128.rom, Resources/amsdos.rom,
+    // etc.) - there is no Resources/rom/ subdirectory in the bundle.
+    // The old check here looked for `resourcePath/rom` as a single
+    // directory to copy wholesale; that path never existed, so the
+    // copy silently no-op'd (fileExistsAtPath was just false - no
+    // error to log) and Documents/rom/ was never created at all. That
+    // is exactly why cap32.cpp reported "Couldn't open ROM file
+    // '.../Documents/rom//cpc6128.rom'" - the directory was empty.
+    // Instead, create Documents/rom/ ourselves and copy each known ROM
+    // file in from the bundle root.
+    NSArray<NSString *> *romFiles = @[ @"cpc464.rom", @"cpc664.rom", @"cpc6128.rom",
+                                        @"amsdos.rom", @"MF2.rom" ];
     NSString *destRoms = [documentsPath stringByAppendingPathComponent:@"rom"];
     BOOL isDir = NO;
     if (![fm fileExistsAtPath:destRoms isDirectory:&isDir] || !isDir) {
-        NSString *srcRoms = [[bundle resourcePath] stringByAppendingPathComponent:@"rom"];
-        if ([fm fileExistsAtPath:srcRoms]) {
-            NSError *err = nil;
-            [fm copyItemAtPath:srcRoms toPath:destRoms error:&err];
-            if (err) {
-                NSLog(@"Caprice32: failed to seed rom/: %@", err);
-            }
+        NSError *dirErr = nil;
+        [fm createDirectoryAtPath:destRoms withIntermediateDirectories:YES attributes:nil error:&dirErr];
+        if (dirErr) {
+            NSLog(@"Caprice32: failed to create rom/ dir: %@", dirErr);
+        }
+    }
+    for (NSString *romName in romFiles) {
+        NSString *destRomPath = [destRoms stringByAppendingPathComponent:romName];
+        if ([fm fileExistsAtPath:destRomPath]) continue;
+        NSString *srcRomPath = [[bundle resourcePath] stringByAppendingPathComponent:romName];
+        if (![fm fileExistsAtPath:srcRomPath]) {
+            NSLog(@"Caprice32: expected ROM not found in bundle: %@", srcRomPath);
+            continue;
+        }
+        NSError *err = nil;
+        [fm copyItemAtPath:srcRomPath toPath:destRomPath error:&err];
+        if (err) {
+            NSLog(@"Caprice32: failed to seed %@: %@", romName, err);
         }
     }
 }
