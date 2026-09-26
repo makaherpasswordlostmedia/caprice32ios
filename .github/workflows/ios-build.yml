@@ -420,12 +420,13 @@ jobs:
           cp "$GITHUB_WORKSPACE/ios93_compat_shim.h" /tmp/ios93_compat_shim.h
 
           SRC_DIRS="src src/audio src/audio/coreaudio src/audio/disk src/audio/dummy \
-            src/atomic src/cpuinfo src/dynapi src/events src/file src/haptic src/haptic/dummy \
+            src/atomic src/cpuinfo src/dynapi src/events src/file src/file/cocoa src/haptic src/haptic/dummy \
             src/joystick src/joystick/iphoneos src/loadso/dlopen src/power src/power/uikit \
             src/filesystem/cocoa src/render src/render/software src/render/opengles src/render/opengles2 \
             src/thread src/thread/pthread src/thread/generic src/timer src/timer/unix \
-            src/stdlib src/libm src/video src/video/uikit src/misc src/misc/unix \
-            src/sensor src/sensor/dummy src/locale src/locale/unix"
+            src/stdlib src/libm src/video src/video/uikit src/video/dummy src/video/yuv2rgb \
+            src/misc src/misc/unix src/main/ios src/core/uikit \
+            src/sensor src/sensor/dummy src/sensor/coremotion src/locale src/locale/unix"
 
           OBJDIR=/tmp/sdl2-obj
           mkdir -p "$OBJDIR"
