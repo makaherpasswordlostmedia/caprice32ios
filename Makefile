@@ -30,6 +30,7 @@ Caprice32ARMv7_CFLAGS = \
 	-I$(SDK_ROOT)/usr/include \
 	-I$(SDK_ROOT)/usr/include/SDL2 \
 	-I$(SDK_ROOT)/usr/include/freetype2 \
+	-fno-modules -fno-cxx-modules \
 	-DNDEBUG
 
 Caprice32ARMv7_CXXFLAGS = $(Caprice32ARMv7_CFLAGS) -std=gnu++17
