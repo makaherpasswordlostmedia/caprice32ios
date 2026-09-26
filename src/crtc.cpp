@@ -1058,7 +1058,16 @@ void render24bpp()
    const dword *pal = GateArray.palette;
    while (bCount--) {
       dword val = pal[*src++];
-      *reinterpret_cast<word *>(dst) = static_cast<word>(val);
+      // Byte-by-byte store: dst advances by 3 bytes/pixel, so every other
+      // pixel lands on an odd address. A reinterpret_cast<word*> store here
+      // used to compile to a halfword STRH on most targets, but on this
+      // armv7/iOS toolchain it produced a strict-alignment access that
+      // SIGBUS'd (EXC_ARM_DA_ALIGN) the instant the emulator picked a
+      // 24bpp SDL_Renderer texture format (common on older PowerVR SGX
+      // GPUs) - i.e. every real device this build targets. Plain byte
+      // stores have no alignment requirement on any architecture.
+      *dst = static_cast<byte>(val);
+      *(dst + 1) = static_cast<byte>(val >> 8);
       *(dst + 2) = static_cast<byte>(val >> 16);
       dst += 3;
    }
@@ -1078,13 +1087,18 @@ void render24bpp_doubleY()
    const dword *pal = GateArray.palette;
    while (bCount--) {
       dword val = pal[*src++];
-      word wVal = static_cast<word>(val);
-      byte bVal = static_cast<byte>(val >> 16);
+      byte b0 = static_cast<byte>(val);
+      byte b1 = static_cast<byte>(val >> 8);
+      byte b2 = static_cast<byte>(val >> 16);
 
-      *reinterpret_cast<word *>(dst1) = wVal;
-      *(dst1 + 2) = bVal;
-      *reinterpret_cast<word *>(dst2) = wVal;
-      *(dst2 + 2) = bVal;
+      // See render24bpp() above: byte stores instead of a word-cast store,
+      // to avoid a misaligned access every other pixel (3 bytes/pixel).
+      *dst1 = b0;
+      *(dst1 + 1) = b1;
+      *(dst1 + 2) = b2;
+      *dst2 = b0;
+      *(dst2 + 1) = b1;
+      *(dst2 + 2) = b2;
 
       dst1 += 3;
       dst2 += 3;
