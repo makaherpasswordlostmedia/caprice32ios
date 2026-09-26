@@ -3314,7 +3314,9 @@ int cap32_main (int argc, char **argv)
          }
          CPC.scr_pos = CPC.scr_base + dwOffset; // update current rendering position
 
+         if (dwFrameCountOverall < 5) { fprintf(stderr, "TRACE: frame %u before z80_execute\n", dwFrameCountOverall); fflush(stderr); }
          iExitCondition = z80_execute(); // run the emulation until an exit condition is met
+         if (dwFrameCountOverall < 5) { fprintf(stderr, "TRACE: frame %u after z80_execute, condition=%d\n", dwFrameCountOverall, iExitCondition); fflush(stderr); }
 
          if (iExitCondition == EC_BREAKPOINT) {
             if (z80.breakpoint_reached || z80.watchpoint_reached) {
@@ -3343,6 +3345,7 @@ int cap32_main (int argc, char **argv)
          if (iExitCondition == EC_FRAME_COMPLETE) { // emulation finished rendering a complete frame?
             dwFrameCountOverall++;
             dwFrameCount++;
+            if (dwFrameCountOverall < 5) { fprintf(stderr, "TRACE: frame %u EC_FRAME_COMPLETE, before OSD/print\n", dwFrameCountOverall); fflush(stderr); }
             if (SDL_GetTicks() < osd_timing) {
                print(static_cast<byte *>(back_surface->pixels) + CPC.scr_line_offs, osd_message.c_str(), true);
             } else if (CPC.scr_fps) {
@@ -3350,8 +3353,11 @@ int cap32_main (int argc, char **argv)
                sprintf(chStr, "%3dFPS %3d%%", static_cast<int>(dwFPS), static_cast<int>(dwFPS) * 100 / (1000 / static_cast<int>(FRAME_PERIOD_MS)));
                print(static_cast<byte *>(back_surface->pixels) + CPC.scr_line_offs, chStr, true); // display the frames per second counter
             }
+            if (dwFrameCountOverall < 5) { fprintf(stderr, "TRACE: frame %u before asic_draw_sprites\n", dwFrameCountOverall); fflush(stderr); }
             asic_draw_sprites();
+            if (dwFrameCountOverall < 5) { fprintf(stderr, "TRACE: frame %u before video_display\n", dwFrameCountOverall); fflush(stderr); }
             video_display(); // update PC display
+            if (dwFrameCountOverall < 5) { fprintf(stderr, "TRACE: frame %u after video_display\n", dwFrameCountOverall); fflush(stderr); }
             if (take_screenshot) {
               dumpScreen();
               take_screenshot = false;
