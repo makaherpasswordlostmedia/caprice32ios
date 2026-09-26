@@ -279,6 +279,26 @@ jobs:
           # compile or select it, even accidentally.
           IOS_CFLAGS="$IOS_TARGET_FLAGS -fobjc-arc -DSDL_VIDEO_RENDER_OGL_ES=0 -DSDL_VIDEO_RENDER_OGL_ES2=1 -DSDL_VIDEO_RENDER_METAL=0 -DGL_SILENCE_DEPRECATION -Iinclude -I."
 
+          # This community SDK mirror (Sn0wCooder/theos-sdks) is labeled
+          # iPhoneOS9.3.sdk but its UIApplication.h is missing
+          # UIApplicationOpenURLOptionsKey, a real iOS 9.0+ symbol that
+          # SDL_uikitappdelegate.m uses in a method signature. Rather
+          # than patch SDL source (fragile against upstream changes),
+          # shim the missing typedef via a force-included header so it
+          # exists regardless of what this particular SDK mirror ships.
+          cat > /tmp/ios93_compat_shim.h <<'EOF'
+#import <Foundation/Foundation.h>
+/*
+ * This SDK mirror's UIApplication.h omits UIApplicationOpenURLOptionsKey
+ * (real iOS 9.0+ API). #define'ing a macro would break real usages
+ * elsewhere, so instead alias the missing type name only if the SDK
+ * itself hasn't already declared it as a macro.
+ */
+#ifndef UIApplicationOpenURLOptionsKey
+typedef NSString * UIApplicationOpenURLOptionsKey;
+#endif
+EOF
+
           SRC_DIRS="src src/audio src/audio/coreaudio src/audio/disk src/audio/dummy \
             src/atomic src/cpuinfo src/dynapi src/events src/file src/haptic src/haptic/dummy \
             src/joystick src/joystick/iphoneos src/loadso/dlopen src/power src/power/uikit \
@@ -304,7 +324,10 @@ jobs:
               base="$(echo "$f" | tr '/' '_')"
               obj="$OBJDIR/${base%.*}.o"
               echo "Compiling $f"
-              "$IOS_CC" $IOS_CFLAGS -c "$f" -o "$obj"
+              case "$f" in
+                *.m) "$IOS_CC" $IOS_CFLAGS -include /tmp/ios93_compat_shim.h -c "$f" -o "$obj" ;;
+                *)   "$IOS_CC" $IOS_CFLAGS -c "$f" -o "$obj" ;;
+              esac
               OBJS+=("$obj")
             done
           done
