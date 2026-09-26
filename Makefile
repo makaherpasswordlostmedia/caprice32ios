@@ -31,6 +31,7 @@ ADDITIONAL_CFLAGS += -fno-modules -fno-cxx-modules -fno-implicit-modules -fno-im
 
 Caprice32ARMv7_CFLAGS = \
 	-Isrc \
+	-Isrc/gui/includes \
 	-Isrc/capsimg/LibIPF -Isrc/capsimg/Device -Isrc/capsimg/CAPSImg \
 	-Isrc/capsimg/Codec -Isrc/capsimg/Core \
 	-I$(SDK_ROOT)/usr/include \
