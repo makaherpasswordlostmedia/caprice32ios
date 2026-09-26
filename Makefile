@@ -15,7 +15,7 @@ APPLICATION_NAME = Caprice32ARMv7
 # excluded, so DevTools/showGui/etc. stay real, linkable no-ops instead
 # of needing every call site in cap32.cpp's main loop touched.
 Caprice32ARMv7_FILES = $(filter-out src/gui/%,$(wildcard src/*.cpp src/capsimg/*/*.cpp))
-Caprice32ARMv7_FILES += main_ios.mm AppDelegate.mm
+Caprice32ARMv7_FILES += main_ios.mm AppDelegate.mm ios93_availability_stub.m
 
 # SDK_ROOT is passed in from the workflow (see
 # .github/workflows/ios-build.yml, "Stage libs into Theos SDK lib dir").
@@ -71,14 +71,13 @@ Caprice32ARMv7_CXXFLAGS = $(Caprice32ARMv7_CFLAGS) -std=gnu++17
 # freetype2 - see .github/workflows/ios-build.yml for how each lands
 # in $(SDK_ROOT)/usr/lib).
 # Availability builtin (___isPlatformVersionAtLeast) needed by SDL2's
-# UIKit backend. Resolved via CLANG_RT_IOS_LIB, computed in
-# ios-build.yml from whatever compiler-rt archive this toolchain
-# actually ships (name/location vary by build) - do not hardcode
-# -lclang_rt.ios here, it does not exist in this toolchain release.
+# UIKit backend is provided by our own ios93_availability_stub.m
+# (this bare cross-toolchain ships no compiler-rt archive at all to
+# link it from) - see that file for details. No extra linker flag
+# needed here; it's just another translation unit in FILES above.
 Caprice32ARMv7_LDFLAGS = \
 	-L$(SDK_ROOT)/usr/lib \
 	-lSDL2 -lfreetype -lpng16 -lz \
-	$(CLANG_RT_IOS_LIB) \
 	-framework UIKit \
 	-framework Foundation \
 	-framework QuartzCore \
