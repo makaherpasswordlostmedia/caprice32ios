@@ -22,7 +22,9 @@
 #include <chrono>
 #include <string>
 #include <thread>
-#include <filesystem>
+#include <climits>
+#include <cstdlib>
+#include <unistd.h>
 
 #include "SDL.h"
 
@@ -207,7 +209,7 @@ byte bit_values[8] = {
 #include "rom_mods.h"
 
 char chAppPath[_MAX_PATH + 1];
-std::filesystem::path binPath; // Where the binary is
+std::string binPath; // Where the binary is (directory, no trailing slash)
 char chROMSelected[_MAX_PATH + 1];
 std::string chROMFile[4] = {
    "cpc464.rom",
@@ -1765,7 +1767,7 @@ std::string getConfigurationFilename(bool forWrite)
     { getenv("HOME"), "/.config/cap32.cfg" },
     { getenv("HOME"), "/.cap32.cfg" },
     { DESTDIR, "/etc/cap32.cfg" },
-    { binPath.string().c_str(), "/../Resources/cap32.cfg" }, // To find the configuration from the bundle on MacOS
+    { binPath.c_str(), "/../Resources/cap32.cfg" }, // To find the configuration from the bundle on MacOS
   };
 
   for(const auto& p: configPaths){
@@ -1777,7 +1779,7 @@ std::string getConfigurationFilename(bool forWrite)
       // Dirty hack for MacOS Bundle to work: change dir to the bin dir
       // cap32.cfg is edited to have relative paths from the bin dir
       if (p.second == "/../Resources/cap32.cfg") {
-              std::filesystem::current_path(binPath);
+              chdir(binPath.c_str());
       }
       return s;
     }
@@ -2728,12 +2730,27 @@ int cap32_main (int argc, char **argv)
    SDL_Event event;
    std::vector<std::string> slot_list;
 
-   try {
-     binPath = std::filesystem::absolute(std::filesystem::path(argv[0]).parent_path());
-   } catch(...) {
-     // Dirty fallback in case the executable is found in the path.
-     // binPath is only use for bundles anyway, where this is not the case.
-     binPath = std::filesystem::absolute(".");
+   {
+     // Resolve the directory containing argv[0] to an absolute path,
+     // without std::filesystem (its <filesystem> support, including
+     // ~path(), is annotated unavailable before iOS 13 in this libc++,
+     // and this build targets iOS 9.3). realpath() + dirname-by-hand
+     // covers the same two cases std::filesystem::absolute() handled:
+     // a real argv[0] path, or "." as a dirty fallback if resolution
+     // fails (binPath is only used for bundles anyway, where argv[0]
+     // found via PATH lookup isn't the case).
+     char resolved[PATH_MAX];
+     std::string toResolve = argv[0];
+     size_t lastSlash = toResolve.find_last_of('/');
+     std::string dir = (lastSlash == std::string::npos) ? "." : toResolve.substr(0, lastSlash);
+     if (dir.empty()) dir = "/";
+     if (realpath(dir.c_str(), resolved) != nullptr) {
+       binPath = resolved;
+     } else if (realpath(".", resolved) != nullptr) {
+       binPath = resolved;
+     } else {
+       binPath = ".";
+     }
    }
    parseArguments(argc, argv, slot_list, args);
 

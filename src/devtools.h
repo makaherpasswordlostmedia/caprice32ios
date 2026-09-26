@@ -30,7 +30,6 @@ class DevTools {
     SDL_Renderer* renderer = nullptr;
     SDL_Texture* texture = nullptr;
     SDL_Surface* surface = nullptr;
-    int scale = 0;
 };
 
 #endif
