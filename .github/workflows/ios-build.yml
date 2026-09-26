@@ -190,9 +190,12 @@ jobs:
           "$IOS_AR" rcs libz.a "${OBJS[@]}"
 
           test -f libz.a || { echo "::error::libz.a was not produced"; exit 1; }
+          rm -f "$IOS_STAGE/include/zlib.h" "$IOS_STAGE/include/zconf.h"
           cp libz.a "$IOS_STAGE/lib/"
           cp zlib.h zconf.h "$IOS_STAGE/include/"
           echo "libz.a built: $(du -h "$IOS_STAGE/lib/libz.a")"
+          echo "ZLIB_VERNUM in staged header:"
+          grep ZLIB_VERNUM "$IOS_STAGE/include/zlib.h"
 
       - name: Cross-compile libpng for armv7/iOS
         run: |
@@ -200,14 +203,36 @@ jobs:
             https://download.sourceforge.net/libpng/libpng-1.6.44.tar.gz
           mkdir -p /tmp/libpng && tar -xzf /tmp/libpng.tar.gz -C /tmp/libpng --strip-components=1
           cd /tmp/libpng
+
+          # Make sure our hand-built armv7 zlib.h is the ONLY zlib header
+          # this compiler can see. The libpng version check in pngpriv.h
+          # compares ZLIB_VERNUM (from whichever zlib.h gets included)
+          # against PNG_ZLIB_VERNUM (recorded from the zlib.h seen at
+          # configure time). If the compile step for png.c/pngget.c/etc
+          # resolves zlib.h via a different search path than the configure
+          # probe did (e.g. falls through to the host's /usr/include/zlib.h
+          # because our -I wasn't first, or wasn't passed to that specific
+          # compile), the versions mismatch and every .c file that includes
+          # pngpriv.h fails identically - which is exactly the symptom here.
+          echo "zlib.h resolved by search path:"
+          echo | "$IOS_CC" $IOS_TARGET_FLAGS -I"$IOS_STAGE/include" -E -H -xc - <<< '#include <zlib.h>' 2>&1 | grep zlib.h | head -5
+
           CC="$IOS_CC" \
           AR="$IOS_AR" \
           RANLIB=: \
+          CPPFLAGS="-I$IOS_STAGE/include" \
           CFLAGS="$IOS_TARGET_FLAGS -I$IOS_STAGE/include" \
           LDFLAGS="$IOS_TARGET_FLAGS -L$IOS_STAGE/lib" \
+          ZLIBLIB="$IOS_STAGE/lib" \
+          ZLIBINC="$IOS_STAGE/include" \
           ./configure --host=arm-apple-darwin --disable-shared --enable-static \
                       --prefix=/tmp/libpng-out
-          make -j"$(nproc)"
+
+          # Belt-and-suspenders: libpng's Makefile can carry its own
+          # DEFAULT_INCLUDES / CPPFLAGS separate from what configure was
+          # invoked with. Force our zlib include first on every actual
+          # compile, regardless of what configure decided to bake in.
+          make -j"$(nproc)" CPPFLAGS="-I$IOS_STAGE/include" CFLAGS="$IOS_TARGET_FLAGS -I$IOS_STAGE/include"
           make install
           cp /tmp/libpng-out/lib/libpng16.a "$IOS_STAGE/lib/"
           cp /tmp/libpng-out/include/*.h "$IOS_STAGE/include/"
