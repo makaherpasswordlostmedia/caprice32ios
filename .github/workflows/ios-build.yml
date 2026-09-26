@@ -287,17 +287,17 @@ jobs:
           # shim the missing typedef via a force-included header so it
           # exists regardless of what this particular SDK mirror ships.
           cat > /tmp/ios93_compat_shim.h <<'EOF'
-#import <Foundation/Foundation.h>
-/*
- * This SDK mirror's UIApplication.h omits UIApplicationOpenURLOptionsKey
- * (real iOS 9.0+ API). #define'ing a macro would break real usages
- * elsewhere, so instead alias the missing type name only if the SDK
- * itself hasn't already declared it as a macro.
- */
-#ifndef UIApplicationOpenURLOptionsKey
-typedef NSString * UIApplicationOpenURLOptionsKey;
-#endif
-EOF
+          #import <Foundation/Foundation.h>
+          /*
+           * This SDK mirror's UIApplication.h omits UIApplicationOpenURLOptionsKey
+           * (real iOS 9.0+ API). #define'ing a macro would break real usages
+           * elsewhere, so instead alias the missing type name only if the SDK
+           * itself hasn't already declared it as a macro.
+           */
+          #ifndef UIApplicationOpenURLOptionsKey
+          typedef NSString * UIApplicationOpenURLOptionsKey;
+          #endif
+          EOF
 
           SRC_DIRS="src src/audio src/audio/coreaudio src/audio/disk src/audio/dummy \
             src/atomic src/cpuinfo src/dynapi src/events src/file src/haptic src/haptic/dummy \
