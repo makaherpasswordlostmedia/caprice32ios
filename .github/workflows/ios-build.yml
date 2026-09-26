@@ -113,6 +113,28 @@ jobs:
           cat /tmp/__config_site.in
           echo "-----------------------------------------"
 
+          # Sanity check: the __config_site we're about to generate must
+          # match the ABI namespace actually baked into this toolchain's
+          # prebuilt static libc++.a, not just upstream's CMake defaults.
+          # If they disagree, every std:: symbol mismatches at link time
+          # (exactly the "Undefined symbols ... _LIBCPP_ABI_NAMESPACE ..."
+          # wall this step exists to prevent).
+          LIBCXX_A="$(find "$THEOS/toolchain/linux/iphone" -name 'libc++.a' | head -1)"
+          if [ -z "$LIBCXX_A" ]; then
+            echo "::error::Could not find libc++.a in toolchain to verify ABI namespace."
+            exit 1
+          fi
+          # Look for a mangled symbol containing an explicit ABI namespace
+          # tag (e.g. 5__1 or similar numbered identifier) vs plain "St".
+          if nm "$LIBCXX_A" 2>/dev/null | grep -q '_ZNSt3__1'; then
+            DETECTED_NAMESPACE="__1"
+          elif nm "$LIBCXX_A" 2>/dev/null | grep -qE '_ZNSt[0-9]+[A-Za-z_]+[0-9]'; then
+            DETECTED_NAMESPACE="$(nm "$LIBCXX_A" | grep -oE '_ZNSt[0-9]+[A-Za-z_]+' | head -1 | sed -E 's/_ZNSt[0-9]+//')"
+          else
+            DETECTED_NAMESPACE=""
+          fi
+          echo "Detected ABI namespace in prebuilt libc++.a: '${DETECTED_NAMESPACE:-<none/plain std>}'"
+
           # Turn #cmakedefine / #cmakedefine01 lines into real #define
           # (or commented-out #undef) lines, AND resolve the bare
           # @VAR@-style substitutions this template also contains
@@ -142,7 +164,7 @@ jobs:
           #       empty is the correct value for a build enabling no
           #       non-default ABI flags, which matches everything else
           #       chosen above)
-          awk '
+          awk -v ns="$DETECTED_NAMESPACE" '
             /^#cmakedefine01[ \t]+_LIBCPP_HAS_THREAD_API_PTHREAD/ {
               print "#define _LIBCPP_HAS_THREAD_API_PTHREAD 1"; next
             }
@@ -151,6 +173,10 @@ jobs:
             }
             /^#cmakedefine[ \t]+_LIBCPP_ABI_VERSION/ {
               print "#define _LIBCPP_ABI_VERSION 1"; next
+            }
+            /^#cmakedefine[ \t]+_LIBCPP_ABI_NAMESPACE/ {
+              if (ns != "") { print "#define _LIBCPP_ABI_NAMESPACE " ns } else { print "/* #undef _LIBCPP_ABI_NAMESPACE */" }
+              next
             }
             /^#cmakedefine[ \t]+_LIBCPP_HAS_THREAD_API_PTHREAD/ {
               print "#define _LIBCPP_HAS_THREAD_API_PTHREAD"; next
@@ -180,6 +206,9 @@ jobs:
             cp /tmp/__config_site "$d/__config_site"
           done
           find "$THEOS/toolchain/linux/iphone" -name '__config_site'
+
+          echo "----- compiler-rt builtins available in this toolchain -----"
+          find "$THEOS/toolchain/linux/iphone" -iname '*clang_rt*' -o -iname '*builtins*' 2>/dev/null
 
       - name: Install iPhoneOS 9.3 SDK
         env:
