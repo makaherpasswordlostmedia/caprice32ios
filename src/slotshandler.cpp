@@ -482,11 +482,15 @@ int dsk_load (FILE *pfile, t_drive *drive)
   dword dwTrackSize, track, side, sector, dwSectorSize, dwSectors;
   byte *pbPtr, *pbDataPtr, *pbTempPtr, *pbTrackSizeTable;
   byte dsk_header[0x100];
+  CRASH_CHECKPOINT("dsk_load: before header fread");
   if(fread(dsk_header, 0x100, 1, pfile) != 1) { // read DSK header
     LOG_ERROR("Couldn't read DSK header");
     return ERR_DSK_INVALID;
   }
   pbPtr = dsk_header;
+  fprintf(stderr, "dsk_load: header id='%.8s' tracks=%u sides=%u\n",
+          pbPtr, (unsigned)*(pbPtr + 0x30), (unsigned)*(pbPtr + 0x31));
+  fflush(stderr);
 
   if (memcmp(pbPtr, "MV - CPC", 8) == 0) { // normal DSK image?
     LOG_DEBUG("Loading normal disk");
@@ -504,6 +508,7 @@ int dsk_load (FILE *pfile, t_drive *drive)
     drive->sides--; // zero base number of sides
     for (track = 0; track < drive->tracks; track++) { // loop for all tracks
       for (side = 0; side <= drive->sides; side++) { // loop for all sides
+        CRASH_CHECKPOINT_FAST("dsk_load: standard track loop iteration");
         byte track_header[0x100];
         if(fread(track_header, 0x100, 1, pfile) != 1) { // read track header
           LOG_ERROR("Couldn't read DSK track header for track " << track << " side " << side);
@@ -516,7 +521,14 @@ int dsk_load (FILE *pfile, t_drive *drive)
           dsk_eject(drive);
           return ERR_DSK_INVALID;
         }
-        dwSectorSize = 0x80 << *(pbPtr + 0x14); // determine sector size in bytes
+        {
+          byte sizeCode = *(pbPtr + 0x14);
+          if (sizeCode > 7) { // 0x80 << 7 = 16KB, already larger than any real CPC sector; anything above is corrupt/garbage data and would overflow/UB on shift
+            LOG_ERROR("DSK track " << track << " side " << side << " has invalid sector size code " << (int)sizeCode << ", clamping to 7");
+            sizeCode = 7;
+          }
+          dwSectorSize = 0x80 << sizeCode; // determine sector size in bytes
+        }
         dwSectors = *(pbPtr + 0x15); // grab number of sectors
         if (dwSectors > DSK_SECTORMAX) { // abort if sector count greater than maximum
           LOG_ERROR("DSK track with " << dwSectors << " sectors, expected " << DSK_SECTORMAX << "or less");
@@ -564,6 +576,7 @@ int dsk_load (FILE *pfile, t_drive *drive)
       drive->sides--; // zero base number of sides
       for (track = 0; track < drive->tracks; track++) { // loop for all tracks
         for (side = 0; side <= drive->sides; side++) { // loop for all sides
+          CRASH_CHECKPOINT_FAST("dsk_load: extended track loop iteration");
           dwTrackSize = (*pbTrackSizeTable++ << 8); // track size in bytes
           LOG_DEBUG("Track " << track << ", side " << side << ", size " << dwTrackSize);
           if (dwTrackSize != 0) { // only process if track contains data
@@ -596,7 +609,12 @@ int dsk_load (FILE *pfile, t_drive *drive)
             for (sector = 0; sector < dwSectors; sector++) { // loop for all sectors
               memcpy(drive->track[track][side].sector[sector].CHRN, pbPtr, 4); // copy CHRN
               memcpy(drive->track[track][side].sector[sector].flags, (pbPtr + 0x04), 2); // copy ST1 & ST2
-              dword dwRealSize = 0x80 << *(pbPtr+0x03);
+              byte realSizeCode = *(pbPtr+0x03);
+              if (realSizeCode > 7) { // same UB/overflow risk as the standard DSK header field above
+                LOG_ERROR("DSK track " << track << " side " << side << " sector " << sector << " has invalid real-size code " << (int)realSizeCode << ", clamping to 7");
+                realSizeCode = 7;
+              }
+              dword dwRealSize = 0x80 << realSizeCode;
               dwSectorSize = *(pbPtr + 0x6) + (*(pbPtr + 0x7) << 8); // sector size in bytes
               drive->track[track][side].sector[sector].setSizes(dwRealSize, dwSectorSize);
               drive->track[track][side].sector[sector].setData(pbDataPtr); // store pointer to sector data
@@ -622,6 +640,9 @@ int dsk_load (FILE *pfile, t_drive *drive)
       return ERR_DSK_INVALID; // file could not be identified as a valid DSK
     }
   }
+  fprintf(stderr, "dsk_load: done, tracks=%u sides=%u\n", (unsigned)drive->tracks, (unsigned)(drive->sides + 1));
+  fflush(stderr);
+  CRASH_CHECKPOINT("dsk_load: done");
   return 0;
 }
 
@@ -972,6 +993,10 @@ int snapshot_load (FILE *pfile)
     GateArray.sl_count = sh.ga_sl_count;
     z80.int_pending = sh.z80_int_pending;
   }
+  fprintf(stderr, "snapshot_load: done, version=%u model=%u ram_size=%uKB PC=%04x SP=%04x\n",
+          (unsigned)sh.version, (unsigned)CPC.model, (unsigned)dwSnapSize, z80.PC.w.l, z80.SP.w.l);
+  fflush(stderr);
+  CRASH_CHECKPOINT("snapshot_load: done");
   return 0;
 }
 
