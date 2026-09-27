@@ -1036,6 +1036,18 @@ int emulator_patch_ROM ()
    } else { // Plus range
       if (pbCartridgePages[0] != nullptr) {
          pbROMlo = pbCartridgePages[0];
+      } else {
+         // Previously silent: with no cartridge loaded, pbROMlo was
+         // left pointing at pbROM, which at this point is freshly
+         // new'd but never written to (see the buffer allocations
+         // above - no memset) or loaded from any file in this branch.
+         // The Z80 would then execute whatever uninitialized heap
+         // garbage happened to be there as if it were real CPC OS ROM
+         // code, wandering to an arbitrary PC and eventually faulting
+         // - the exact SIGBUS this was chased down from. A Plus model
+         // with no cartridge has no ROM to run; fail explicitly.
+         LOG_ERROR("Plus range model selected with no cartridge loaded: no ROM to boot from");
+         return ERR_CPC_ROM_MISSING;
       }
    }
 
@@ -1167,6 +1179,18 @@ int emulator_init ()
    // Ensure 1 byte is available before pbRAM as prerender_normal*_plus can read it
    pbRAM = pbRAMbuffer + 1;
    pbROM = new byte [32*1024]; // allocate memory for 32K of ROM
+   // Zero it rather than leaving it as raw new'd heap garbage: every
+   // path that's supposed to fill this (the CPC.model <= 2 ROM file
+   // load, or a Plus cartridge) either populates it or now bails out
+   // with an error above/below - but zeroing here means any future gap
+   // in that coverage decodes as a long run of Z80 NOPs (0x00) instead
+   // of arbitrary uninitialized bytes that can be decoded as anything,
+   // including opcodes that jump PC to an unrelated unaligned address.
+   // That was the underlying mechanism of the SIGBUS this was
+   // originally chased from - a wrong CPC.model let pbROM stay
+   // unfilled, and the garbage that happened to already be there got
+   // executed as code.
+   memset(pbROM, 0, 32*1024);
    pbRegisterPage = new byte [16*1024];
    pbROMlo = pbROM;
    pbROMhi =
@@ -1816,7 +1840,23 @@ void loadConfiguration (t_CPC &CPC, const std::string& configFilename)
    std::string appPath = chAppPath;
 
    CPC.model = conf.getIntValue("system", "model", 2); // CPC 6128
-   if (CPC.model > 3) {
+   if (CPC.model > 3 || CPC.model < 0) {
+      // Only the upper bound was checked before. A negative value here
+      // (a corrupt/hand-edited cap32.cfg, or any config source that
+      // can't be trusted to only ever produce 0..3) survives the
+      // `CPC.model <= 2` check in emulator_patch_ROM() unchanged - that
+      // comparison is true for any negative number too - and then
+      // indexes chROMFile[CPC.model] with a negative subscript: reading
+      // out-of-bounds memory *before* the array as if it were a valid
+      // ROM filename string. Whatever garbage bytes happen to sit
+      // there get treated as a path; fopen() usually just fails on it,
+      // but the read past the array bound, and the following
+      // fopen()-with-garbage-path outcome, are both undefined behaviour
+      // - in the specific case that produced this crash, it seeded
+      // pbROM with never-initialized memory downstream instead of
+      // failing cleanly, which the Z80 later decoded as an opcode
+      // stream and eventually jumped through as if it were code,
+      // ending in a SIGBUS on an unrelated unaligned address.
       CPC.model = 2;
    }
    CPC.jumpers = conf.getIntValue("system", "jumpers", 0x1e) & 0x1e; // OEM is Amstrad, video refresh is 50Hz
