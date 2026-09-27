@@ -497,6 +497,39 @@ byte z80_IN_handler (reg_pair port)
 void z80_OUT_handler (reg_pair port, byte val)
 {
    LOG_DEBUG("OUT on port " << std::hex << static_cast<int>(port.w.l) << ", val=" << static_cast<int>(val) << std::dec);
+   // If mf2 was requested in the config but its ROM never got
+   // allocated (bad rom file, missing signature, etc - see the
+   // load-failure path that resets CPC.mf2 = 0, which may run after
+   // this function has already been called at least once with the old
+   // value), every *(pbMF2ROM + ...) write below is now skipped by the
+   // `&& pbMF2ROM` guards rather than dereferencing null. Log that
+   // exactly once (not per-OUT, which would spam this hot path) so
+   // it's visible in caprice32.log instead of just silently no-op'ing.
+   if (CPC.mf2 && !pbMF2ROM) {
+      static bool warned = false;
+      if (!warned) {
+         warned = true;
+         LOG_ERROR("mf2 is enabled in config but pbMF2ROM was never allocated - MF2 I/O writes are being silently skipped");
+      }
+   }
+   // Hot path, so record only in-memory (no disk write per call) - but
+   // this is exactly the function where several past crashes traced
+   // back to a null pbMF2ROM/pbCartridgePages[page] dereference, and
+   // the previous crashlog checkpoints only covered init/main-loop
+   // granularity, not which port/value triggered a specific OUT. If it
+   // happens again, "last checkpoint" in crashlog.txt will now show the
+   // exact port and value instead of just "main loop: before
+   // z80_execute", without needing a rebuild+repro cycle to add it.
+   // Can't use the CRASH_CHECKPOINT_FAST macro here: it string-literal-
+   // concatenates __FILE__ with its argument at compile time, which
+   // only works for literals, not this runtime-formatted buffer - call
+   // the underlying function directly instead.
+   {
+      char buf[96];
+      snprintf(buf, sizeof(buf), "src/cap32.cpp:z80_OUT_handler port=0x%04x val=0x%02x",
+               static_cast<unsigned>(port.w.l), static_cast<unsigned>(val));
+      crashlog::checkpoint_fast(buf);
+   }
    // Amstrad Magnum Phazer
    if ((port.b.h == 0xfb) && (port.b.l == 0xfe)) {
      // When the phazer is not pressed, the CRTC is constantly refreshing R16 & R17:
@@ -514,7 +547,15 @@ void z80_OUT_handler (reg_pair port, byte val)
             #endif
             GateArray.pen = val & 0x10 ? 0x10 : val & 0x0f; // if bit 5 is set, pen indexes the border colour
             LOG_DEBUG("Set pen value to " << static_cast<int>(GateArray.pen));
-            if (CPC.mf2) { // MF2 enabled?
+            if (CPC.mf2 && pbMF2ROM) { // MF2 enabled AND actually allocated?
+               // Previously checked CPC.mf2 alone. If mf2 support was
+               // requested in the config but pbMF2ROM's allocation
+               // never happened or was reverted (see the mf2 rom-file
+               // load failure path around line ~1310, which sets
+               // CPC.mf2 = 0 but only after this function may already
+               // have run once with the old value), this wrote through
+               // a null pointer at a fixed offset - a silent SIGSEGV/
+               // SIGBUS with no indication this was the cause.
                *(pbMF2ROM + 0x03fcf) = val;
             }
             break;
@@ -538,7 +579,7 @@ void z80_OUT_handler (reg_pair port, byte val)
                }
                // TODO: update pbRegisterPage
             }
-            if (CPC.mf2) { // MF2 enabled?
+            if (CPC.mf2 && pbMF2ROM) { // MF2 enabled AND actually allocated?
                int iPen = *(pbMF2ROM + 0x03fcf);
                *(pbMF2ROM + (0x03f90 | ((iPen & 0x10) << 2) | (iPen & 0x0f))) = val;
             }
@@ -558,7 +599,27 @@ void z80_OUT_handler (reg_pair port, byte val)
                int page = (val & 0x7);
                LOG_DEBUG("RMR2: Low bank rom = 0x" << std::hex << (4*membank) << std::dec << "000 - page " << page);
                GateArray.lower_ROM_bank = membank;
-               pbROMlo = pbCartridgePages[page];
+               if (pbCartridgePages[page] != nullptr) {
+                  pbROMlo = pbCartridgePages[page];
+               } else {
+                  // Previously assigned unconditionally. On a machine
+                  // with no cartridge loaded, every entry in
+                  // pbCartridgePages is null (see cartridge.cpp), so
+                  // this would page in a null pointer as the active
+                  // low ROM bank. The very next instruction fetch
+                  // through membank_read[0] then dereferences that
+                  // null pointer - a SIGBUS/SIGSEGV with no indication
+                  // of why, since asic.locked being unlocked and this
+                  // exact RMR2 sequence can occur during normal ROM
+                  // boot/detection code even on hardware this build
+                  // doesn't intend to emulate as Plus-range. Leave
+                  // pbROMlo pointing at whatever it already was
+                  // (the real OS ROM) rather than corrupting it.
+                  char buf[96];
+                  snprintf(buf, sizeof(buf), "src/cap32.cpp: RMR2 blocked null pbCartridgePages[%d] -> pbROMlo", page);
+                  crashlog::checkpoint(buf); // disk write: this is rare, not hot-path
+                  LOG_ERROR("RMR2 tried to page in empty cartridge slot " << page << " as low ROM - ignored");
+               }
                ga_memory_manager();
             } else {
                #ifdef DEBUG_GA
@@ -574,7 +635,7 @@ void z80_OUT_handler (reg_pair port, byte val)
                   z80.int_pending = 0; // clear pending interrupts
                   GateArray.sl_count = 0; // reset GA scanline counter
                }
-               if (CPC.mf2) { // MF2 enabled?
+               if (CPC.mf2 && pbMF2ROM) { // MF2 enabled AND actually allocated?
                   *(pbMF2ROM + 0x03fef) = val;
                }
             }
@@ -600,7 +661,7 @@ void z80_OUT_handler (reg_pair port, byte val)
      LOG_DEBUG("RAM config: " << std::hex << static_cast<int>(val) << std::dec);
      GateArray.RAM_config = val;
      ga_memory_manager();
-     if (CPC.mf2) { // MF2 enabled?
+     if (CPC.mf2 && pbMF2ROM) { // MF2 enabled AND actually allocated?
         *(pbMF2ROM + 0x03fff) = val;
      }
    }
@@ -613,7 +674,7 @@ void z80_OUT_handler (reg_pair port, byte val)
            asic_poke_lock_sequence(val);
          }
          CRTC.reg_select = val;
-         if (CPC.mf2) { // MF2 enabled?
+         if (CPC.mf2 && pbMF2ROM) { // MF2 enabled AND actually allocated?
             *(pbMF2ROM + 0x03cff) = val;
          }
       }
@@ -736,7 +797,7 @@ void z80_OUT_handler (reg_pair port, byte val)
                   break;
             }
          }
-         if (CPC.mf2) { // MF2 enabled?
+         if (CPC.mf2 && pbMF2ROM) { // MF2 enabled AND actually allocated?
             *(pbMF2ROM + (0x03db0 | (*(pbMF2ROM + 0x03cff) & 0x0f))) = val;
          }
          #ifdef DEBUG_CRTC
@@ -763,12 +824,23 @@ void z80_OUT_handler (reg_pair port, byte val)
             page = val & 31;
          }
          GateArray.upper_ROM = page;
-         pbExpansionROM = pbCartridgePages[page];
+         if (pbCartridgePages[page] != nullptr) {
+            pbExpansionROM = pbCartridgePages[page];
+         } else {
+            // leave pbExpansionROM pointing at whatever ROM was
+            // already paged in (same reasoning as the pbROMlo case above -
+            // an unpopulated cartridge slot must not page in a null
+            // pointer as active memory).
+            char buf[96];
+            snprintf(buf, sizeof(buf), "src/cap32.cpp: ROM select blocked null pbCartridgePages[%u] -> pbExpansionROM", page);
+            crashlog::checkpoint(buf); // disk write: this is rare, not hot-path
+            LOG_ERROR("ROM select tried to page in empty cartridge slot " << page << " as expansion ROM - ignored");
+         }
       }
       if (!(GateArray.ROM_config & 0x08)) { // upper/expansion ROM is enabled?
          membank_read[3] = pbExpansionROM; // 'page in' upper/expansion ROM
       }
-      if (CPC.mf2) { // MF2 enabled?
+      if (CPC.mf2 && pbMF2ROM) { // MF2 enabled AND actually allocated?
          *(pbMF2ROM + 0x03aac) = val;
       }
    }
@@ -840,7 +912,7 @@ void z80_OUT_handler (reg_pair port, byte val)
                   psg_write
                }
             }
-            if (CPC.mf2) { // MF2 enabled?
+            if (CPC.mf2 && pbMF2ROM) { // MF2 enabled AND actually allocated?
                *(pbMF2ROM + 0x037ff) = val;
             }
             break;
