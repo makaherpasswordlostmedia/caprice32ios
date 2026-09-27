@@ -27,6 +27,7 @@
 #include "z80.h"
 #include "log.h"
 #include "asic.h"
+#include "crashlog.h"
 #include <cstring>
 
 // RendPos/RendStart point into RendBuff (a plain byte[800]) at an offset
@@ -688,10 +689,26 @@ inline void match_hsw()
       if (CRTC.sl_count == CRTC.interrupt_sl && CRTC.interrupt_sl != 0) {
          LOG_DEBUG("Firing PRI interrupt at GA.sl_count=" << static_cast<int>(GateArray.sl_count) << ", CRTC.sl_count=" << CRTC.sl_count);
          z80.int_pending = 1;
-         asic.raster_int_pending = true;
-         // Set the bit for the raster interrupt in DCSR.
-         word dcsr_addr = 0x6C0F;
-         *(membank_write[dcsr_addr >> 14] + (dcsr_addr & 0x3fff)) |= 0x80;
+         // DCSR (Document/Chip Status Register) is a Plus-range ASIC
+         // register - it does not exist on a plain CPC 464/664/6128.
+         // This write used to fire unconditionally for any model, since
+         // CRTC.interrupt_sl is an ordinary CRTC feature any CPC
+         // software can program, regardless of machine. On non-Plus
+         // hardware membank_write[dcsr_addr >> 14] has no reason to
+         // point anywhere meaningful for this address, since nothing
+         // else on that hardware ever treats 0x6C0F as a real register -
+         // so this was writing through a pointer to memory that isn't
+         // actually backing this address for that purpose. That fired
+         // deterministically on almost every boot (any game/ROM that
+         // sets up a raster interrupt hits this within the first frame),
+         // matching a SIGBUS at the same early PC on every single run.
+         if (CPC.model > 2) { // Plus range only
+            asic.raster_int_pending = true;
+            // Set the bit for the raster interrupt in DCSR.
+            word dcsr_addr = 0x6C0F;
+            CRASH_CHECKPOINT_FAST("crtc.cpp: before DCSR write");
+            *(membank_write[dcsr_addr >> 14] + (dcsr_addr & 0x3fff)) |= 0x80;
+         }
       }
       if (GateArray.hs_count) { // delaying on VSYNC?
          GateArray.hs_count--;
