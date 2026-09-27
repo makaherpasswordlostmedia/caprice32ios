@@ -1108,10 +1108,14 @@ void print (byte *pbAddr, const char *pchStr, bool bolColour)
 int emulator_patch_ROM ()
 {
    byte *pbPtr;
+   CRASH_CHECKPOINT("emulator_patch_ROM: entered");
 
    if(CPC.model <= 2) { // Normal CPC range
       std::string romFilename = CPC.rom_path + "/" + chROMFile[CPC.model];
+      fprintf(stderr, "emulator_patch_ROM: loading OS ROM '%s' for model %u\n", romFilename.c_str(), CPC.model);
+      fflush(stderr);
       if ((pfileObject = fopen(romFilename.c_str(), "rb")) != nullptr) { // load CPC OS + Basic
+         CRASH_CHECKPOINT("emulator_patch_ROM: before fread OS ROM");
          if(fread(pbROM, 2*16384, 1, pfileObject) != 1) {
             fclose(pfileObject);
             LOG_ERROR("Couldn't read ROM file '" << romFilename << "'");
@@ -1143,6 +1147,9 @@ int emulator_patch_ROM ()
 
    // Patch ROM for non-english keyboards
    if (CPC.keyboard) {
+      CRASH_CHECKPOINT("emulator_patch_ROM: before keyboard patch memcpy");
+      fprintf(stderr, "emulator_patch_ROM: patching keyboard layout %u for model %u\n", CPC.keyboard, CPC.model);
+      fflush(stderr);
       pbPtr = pbROMlo;
       switch(CPC.model) {
          case 0: // 464
@@ -1165,6 +1172,7 @@ int emulator_patch_ROM ()
       }
    }
 
+   CRASH_CHECKPOINT("emulator_patch_ROM: done");
    return 0;
 }
 
@@ -1297,6 +1305,7 @@ int emulator_init ()
 
    for (iRomNum = 0; iRomNum < 16; iRomNum++) { // loop for ROMs 0-15
       if (!CPC.rom_file[iRomNum].empty()) { // is a ROM image specified for this slot?
+         CRASH_CHECKPOINT_FAST("emulator_init: loading ROM slot");
          std::string rom_file = CPC.rom_file[iRomNum];
          if (rom_file == "DEFAULT") {
            // On 464, there's no AMSDOS by default.
@@ -1437,6 +1446,31 @@ void emulator_shutdown ()
 void bin_load (const std::string& filename, const size_t offset)
 {
   LOG_INFO("Load " << filename << " in memory at offset 0x" << std::hex << offset);
+  CRASH_CHECKPOINT("bin_load: entered");
+  fprintf(stderr, "bin_load: file='%s' offset=0x%zx ram_size=%uKB\n",
+          filename.c_str(), offset, CPC.ram_size);
+  fflush(stderr);
+
+  // The real allocated buffer is pbRAMbuffer, sized CPC.ram_size*1024+1
+  // bytes (see emulator_init) - not the fixed 0xFFFF this used to assume.
+  // offset comes straight from a user/CLI argument (args.binOffset,
+  // parsed in argparse.cpp) with no prior validation. Two failure modes
+  // this was open to:
+  //   1. offset > actual RAM size: fread() below would write straight
+  //      past the end of pbRAMbuffer into whatever heap memory follows
+  //      it - a straightforward heap overflow from an untrusted CLI arg.
+  //   2. offset > 0xFFFF specifically: "ram_size - offset" (both
+  //      size_t/unsigned) underflows to a huge number, so max_size
+  //      wraps around to near SIZE_MAX and fread is told it may write
+  //      practically unbounded data into a 1-64KB buffer.
+  // Bail out cleanly instead of letting either happen.
+  size_t actual_ram_size = static_cast<size_t>(CPC.ram_size) * 1024;
+  if (offset >= actual_ram_size) {
+    LOG_ERROR("bin_load: offset 0x" << std::hex << offset << " is outside the "
+              << std::dec << CPC.ram_size << "KB RAM - refusing to load");
+    return;
+  }
+
   FILE *file;
   if ((file = fopen(filename.c_str(), "rb")) == nullptr) {
     LOG_ERROR("File not found: " << filename);
@@ -1446,8 +1480,8 @@ void bin_load (const std::string& filename, const size_t offset)
   auto closure = [&]() { fclose(file); };
   memutils::scope_exit<decltype(closure)> cs(closure); // TODO: when C++20, can become a one liner expression.
 
-  size_t ram_size = 0XFFFF; // TODO: Find a way to have the real RAM size
-  size_t max_size = ram_size - offset;
+  size_t ram_size = actual_ram_size; // real buffer size, not a fixed 0xFFFF
+  size_t max_size = ram_size - offset; // safe: offset < ram_size, checked above
   size_t read = fread(&pbRAM[offset], 1, max_size, file);
   if (!feof(file)) {
     LOG_ERROR("Bin file too big to fit in memory");
@@ -1461,6 +1495,9 @@ void bin_load (const std::string& filename, const size_t offset)
     LOG_ERROR("Empty bin file");
     return;
   }
+  CRASH_CHECKPOINT("bin_load: before z80 stack setup");
+  fprintf(stderr, "bin_load: loaded %zu bytes, jumping PC to 0x%zx\n", read, offset);
+  fflush(stderr);
   // Jump at the beginning of the program
   z80.PC.w.l = offset;
   // Setup the stack the way it would be if we had launch it with run"
@@ -1972,8 +2009,20 @@ void loadConfiguration (t_CPC &CPC, const std::string& configFilename)
    }
    CPC.joystick_emulation = static_cast<JoystickEmulation>(conf.getIntValue("system", "joystick_emulation", 0));
    CPC.joysticks = conf.getIntValue("system", "joysticks", 1) & 1;
-   CPC.joystick_menu_button = conf.getIntValue("system", "joystick_menu_button", 9) - 1;
-   CPC.joystick_vkeyboard_button = conf.getIntValue("system", "joystick_vkeyboard_button", 10) - 1;
+   // Both fields are unsigned int (cap32.h). getIntValue()-1 on a config
+   // value of 0 (a hand-edited/corrupt cap32.cfg, or any future caller
+   // that writes 0 here) underflows to 4294967295 instead of a sane
+   // "disabled" sentinel - same class of unchecked-config-value bug as
+   // CPC.model and CPC.scr_style above, just without their explicit
+   // clamp. Currently harmless (event.jbutton.button, an SDL Uint8,
+   // simply never equals it - see the comparisons below), but any
+   // future code that uses this as an array index would read
+   // out-of-bounds. Clamp defensively so the field only ever holds a
+   // real button index or 0.
+   int menuButtonCfg = conf.getIntValue("system", "joystick_menu_button", 9);
+   CPC.joystick_menu_button = (menuButtonCfg > 0) ? static_cast<unsigned int>(menuButtonCfg - 1) : 0;
+   int vkeyButtonCfg = conf.getIntValue("system", "joystick_vkeyboard_button", 10);
+   CPC.joystick_vkeyboard_button = (vkeyButtonCfg > 0) ? static_cast<unsigned int>(vkeyButtonCfg - 1) : 0;
    CPC.resources_path = conf.getStringValue("system", "resources_path", appPath + "/resources");
 
    CPC.devtools_scale = conf.getIntValue("devtools", "scale", 1);
@@ -2278,13 +2327,17 @@ void showGui()
 // TODO: Support watchpoints too
 void loadBreakpoints()
 {
+  CRASH_CHECKPOINT("loadBreakpoints: entered");
   if (args.symFilePath.empty()) return;
+  fprintf(stderr, "loadBreakpoints: parsing sym file '%s'\n", args.symFilePath.c_str());
+  fflush(stderr);
   Symfile symfile(args.symFilePath);
   for (auto breakpoint : symfile.Breakpoints()) {
     if (std::find_if(breakpoints.begin(), breakpoints.end(),
           [&](const auto& bp) { return bp.address == breakpoint; } ) != breakpoints.end()) continue;
     breakpoints.emplace_back(breakpoint);
   }
+  CRASH_CHECKPOINT("loadBreakpoints: done");
 }
 
 bool showDevTools()
@@ -2313,6 +2366,7 @@ bool showDevTools()
 }
 
 void dumpScreen() {
+   CRASH_CHECKPOINT("dumpScreen: entered");
    std::string dir = CPC.sdump_dir;
    if (!is_directory(dir)) {
           LOG_ERROR("Unable to find or open directory " + CPC.sdump_dir + " when trying to take a screenshot. Defaulting to current directory.")
@@ -2321,6 +2375,7 @@ void dumpScreen() {
    std::string dumpFile = "screenshot_" + getDateString() + ".png";
    std::string dumpPath = dir + "/" + dumpFile;
    LOG_INFO("Dumping screen to " + dumpPath);
+   CRASH_CHECKPOINT("dumpScreen: before SDL_SavePNG");
    if (SDL_SavePNG(back_surface, dumpPath)) {
      LOG_ERROR("Could not write screenshot file to " + dumpPath);
    }
@@ -2331,6 +2386,7 @@ void dumpScreen() {
 
 // Very similar to screenshot, but difficult to factorize :-)
 void dumpSnapshot() {
+   CRASH_CHECKPOINT("dumpSnapshot: entered");
    std::string dir = CPC.snap_path;
    if (!is_directory(dir)) {
           LOG_ERROR("Unable to find or open directory " + CPC.snap_path + " when trying to take a machine snapshot. Defaulting to current directory.")
@@ -2339,6 +2395,7 @@ void dumpSnapshot() {
    std::string dumpFile = "snapshot_" + getDateString() + ".sna";
    std::string dumpPath = dir + "/" + dumpFile;
    LOG_INFO("Dumping machine snapshot to " + dumpPath);
+   CRASH_CHECKPOINT("dumpSnapshot: before snapshot_save");
    if (snapshot_save(dumpPath)) {
      LOG_ERROR("Could not write machine snapshot to " + dumpPath);
    }
@@ -2351,6 +2408,9 @@ void dumpSnapshot() {
 void loadSnapshot() {
    if (lastSavedSnapshot.empty()) return;
    LOG_INFO("Loading snapshot from " + lastSavedSnapshot);
+   CRASH_CHECKPOINT("loadSnapshot: before snapshot_load");
+   fprintf(stderr, "loadSnapshot: loading '%s'\n", lastSavedSnapshot.c_str());
+   fflush(stderr);
    if (snapshot_load(lastSavedSnapshot)) {
      LOG_ERROR("Could not load machine snapshot from " + lastSavedSnapshot);
    }
@@ -2359,6 +2419,7 @@ void loadSnapshot() {
      stringutils::splitPath(lastSavedSnapshot, dirname, filename);
      set_osd_message("Restored " + filename);
    }
+   CRASH_CHECKPOINT("loadSnapshot: done");
 }
 
 bool driveAltered() {
@@ -2367,15 +2428,23 @@ bool driveAltered() {
 
 void doCleanUp ()
 {
+   CRASH_CHECKPOINT("doCleanUp: before printer_stop");
    printer_stop();
+   CRASH_CHECKPOINT("doCleanUp: before emulator_shutdown");
    emulator_shutdown();
 
+   CRASH_CHECKPOINT("doCleanUp: before dsk_eject driveA");
    dsk_eject(&driveA);
+   CRASH_CHECKPOINT("doCleanUp: before dsk_eject driveB");
    dsk_eject(&driveB);
+   CRASH_CHECKPOINT("doCleanUp: before tape_eject");
    tape_eject();
 
+   CRASH_CHECKPOINT("doCleanUp: before joysticks_shutdown");
    joysticks_shutdown();
+   CRASH_CHECKPOINT("doCleanUp: before audio_shutdown");
    audio_shutdown();
+   CRASH_CHECKPOINT("doCleanUp: before video_shutdown");
    video_shutdown();
 
    #ifdef DEBUG
@@ -2384,11 +2453,16 @@ void doCleanUp ()
    }
    #endif
 
+   CRASH_CHECKPOINT("doCleanUp: before SDL_Quit");
    SDL_Quit();
+   CRASH_CHECKPOINT("doCleanUp: done");
 }
 
 void cleanExit(int returnCode, bool askIfUnsaved)
 {
+   fprintf(stderr, "cleanExit: returnCode=%d askIfUnsaved=%d\n", returnCode, askIfUnsaved);
+   fflush(stderr);
+   CRASH_CHECKPOINT("cleanExit: entered");
    if (askIfUnsaved && driveAltered() && !userConfirmsQuitWithoutSaving()) {
      return;
    }
@@ -2975,6 +3049,13 @@ int cap32_main (int argc, char **argv)
    CRASH_CHECKPOINT("before loadConfiguration");
    loadConfiguration(CPC, getConfigurationFilename()); // retrieve the emulator configuration
    CRASH_CHECKPOINT("after loadConfiguration, before printer_start");
+   // Log the config values most responsible for past silent crashes
+   // (bad model index, bad rom_path, out-of-range scr_style) so a fresh
+   // caprice32.log always shows the actual resolved state a crash
+   // happened in, not just "loadConfiguration ran".
+   fprintf(stderr, "Config: model=%u ram_size=%u scr_style=%u rom_path=%s\n",
+           CPC.model, CPC.ram_size, CPC.scr_style, CPC.rom_path.c_str());
+   fflush(stderr);
    if (CPC.printer) {
       if (!printer_start()) { // start capturing printer output, if enabled
          CPC.printer = 0;

@@ -23,6 +23,7 @@
 #include "disk.h"
 #include "slotshandler.h"
 #include "ipf.h"
+#include "crashlog.h"
 
 #include "errors.h"
 #include "cartridge.h"
@@ -129,6 +130,7 @@ inline bool fillSlot(t_slot& slot, bool &processedvar, const std::string& fullpa
 // All we do here is fill the proper xxx_file entry.
 void fillSlots (std::vector<std::string> slot_list, t_CPC& CPC)
 {
+   CRASH_CHECKPOINT("fillSlots: entered");
    bool have_DSKA = false;
    bool have_DSKB = false;
    bool have_SNA = false;
@@ -137,12 +139,15 @@ void fillSlots (std::vector<std::string> slot_list, t_CPC& CPC)
 
    for (const auto& slot : slot_list) { // loop for all command line arguments
       LOG_DEBUG("Handling arg " << slot);
+      fprintf(stderr, "fillSlots: handling arg '%s'\n", slot.c_str());
+      fflush(stderr);
       std::string fullpath = stringutils::trim(slot, '"'); // remove quotes if arguments quoted
       if (fullpath.length() > 5) { // minumum for a valid filename
          int pos = fullpath.length() - 4;
          std::string extension = stringutils::lower(fullpath.substr(pos));
 
          if (extension == ".zip") { // are we dealing with a zip archive?
+           CRASH_CHECKPOINT("fillSlots: before zip::dir");
            zip::t_zip_info zip_info;
            zip_info.filename = fullpath;
            zip_info.extensions = ".dsk.sna.cdt.voc.cpr.ipf.raw";
@@ -176,15 +181,21 @@ void fillSlots (std::vector<std::string> slot_list, t_CPC& CPC)
             continue;
       }
    }
+   CRASH_CHECKPOINT("fillSlots: done");
 }
 
 void loadSlots() {
+   CRASH_CHECKPOINT("loadSlots: before driveA file_load");
    memset(&driveA, 0, sizeof(t_drive)); // clear disk drive A data structure
    file_load(CPC.driveA);
+   CRASH_CHECKPOINT("loadSlots: before driveB file_load");
    memset(&driveB, 0, sizeof(t_drive)); // clear disk drive B data structure
    file_load(CPC.driveB);
+   CRASH_CHECKPOINT("loadSlots: before tape file_load");
    file_load(CPC.tape);
+   CRASH_CHECKPOINT("loadSlots: before snapshot file_load");
    file_load(CPC.snapshot);
+   CRASH_CHECKPOINT("loadSlots: done");
    // Cartridge was loaded by emulator_init which called cartridge_load if needed
 }
 
