@@ -42,6 +42,7 @@
 #include <vector>
 #include <fcntl.h>
 #include <unistd.h>
+#include <pthread.h>
 
 namespace crashlog {
 
@@ -51,6 +52,25 @@ namespace detail {
 // main thread only (startup is single-threaded), so a plain char array is
 // fine - no locking needed, and nothing here allocates.
 inline char g_checkpoint[256] = "no checkpoint reached yet";
+
+// Alternate signal stack. Without this, a SIGSEGV/SIGBUS caused by a
+// stack overflow can never actually invoke signal_handler(): the kernel
+// tries to push the signal frame onto the same (already exhausted)
+// stack, fails, and falls back to killing the process with the default
+// disposition - silently, with nothing written to crashlog.txt. This
+// exact case (stack overflow -> handler never runs -> empty log) is
+// indistinguishable from "no crash was logged" unless you know to look
+// for it, and matches a crash report where the crashing thread's whole
+// backtrace is 2-3 kernel/pthread frames with none of our own code in
+// it - there's no room left on that stack to have called into ours.
+// A fixed literal rather than SIGSTKSZ: on some libcs (glibc with a
+// dynamic sigstack size) SIGSTKSZ isn't a compile-time constant at all,
+// and even where it is, its baseline is sized for a *plain* signal
+// handler, not one that formats a message and calls open/write/close -
+// more headroom here costs a few KB once, globally, and removes any
+// risk of the alt-stack itself overflowing while handling the crash.
+constexpr size_t kAltStackSize = 65536;
+inline unsigned char g_altstack[kAltStackSize];
 
 inline char g_log_path[512] = {0};
 
@@ -213,10 +233,21 @@ inline void init() {
       if (fd >= 0) close(fd);
    }
 
+   // Install an alternate signal stack *before* registering the
+   // handlers, and mark every handler SA_ONSTACK, so a stack-overflow
+   // SIGSEGV/SIGBUS (the crashing thread's own stack is unusable) still
+   // gets delivered and logged instead of silently falling through to
+   // SIG_DFL. See g_altstack's comment for why this matters.
+   stack_t ss;
+   ss.ss_sp = detail::g_altstack;
+   ss.ss_size = sizeof(detail::g_altstack);
+   ss.ss_flags = 0;
+   sigaltstack(&ss, nullptr);
+
    struct sigaction sa;
    memset(&sa, 0, sizeof(sa));
    sa.sa_sigaction = detail::signal_handler;
-   sa.sa_flags = SA_SIGINFO;
+   sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
    sigemptyset(&sa.sa_mask);
    sigaction(SIGBUS,  &sa, nullptr);
    sigaction(SIGSEGV, &sa, nullptr);
@@ -266,6 +297,23 @@ inline void checkpoint_fast(const char *msg) {
 
 inline const char *path() {
    return detail::g_log_path;
+}
+
+// sigaltstack() is per-thread, not process-wide: init() only installs
+// one for whichever thread calls it (normally the main thread). Any
+// other thread that might stack-overflow (audio callback thread, SDL's
+// own timer thread, etc.) needs its own alt-stack registered from
+// *that* thread, or a stack-overflow crash on it will hit the same
+// "handler can't run, nothing logged" failure init()'s alt-stack was
+// added to fix. Call this once at the top of any thread's entry
+// function that isn't the one that called init().
+inline void register_thread_altstack() {
+   static thread_local unsigned char altstack[detail::kAltStackSize];
+   stack_t ss;
+   ss.ss_sp = altstack;
+   ss.ss_size = sizeof(altstack);
+   ss.ss_flags = 0;
+   sigaltstack(&ss, nullptr);
 }
 
 // Call this once per instruction/frame in the emulation hot path. Cheap:
