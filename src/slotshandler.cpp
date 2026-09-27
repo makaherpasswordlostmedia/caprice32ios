@@ -1038,13 +1038,13 @@ int tape_insert_cdt (FILE *pfile)
    }
    pbTapeImage.resize(lFileSize+6);
    pbTapeImage[0] = 0x20; // start off with a pause block
-   *reinterpret_cast<word *>(&pbTapeImage[1]) = 2000; // set the length to 2 seconds
+   store_le16(&pbTapeImage[1], 2000); // set the length to 2 seconds
    if(fread(&pbTapeImage[3], lFileSize, 1, pfile) != 1) { // append the entire CDT file
       LOG_ERROR("Couldn't read CDT file");
      return ERR_TAP_INVALID;
    }
    *(&pbTapeImage[lFileSize+3]) = 0x20; // end with a pause block
-   *reinterpret_cast<word *>(&pbTapeImage[lFileSize+3+1]) = 2000; // set the length to 2 seconds
+   store_le16(&pbTapeImage[lFileSize+3+1], 2000); // set the length to 2 seconds
 
    #ifdef DEBUG_TAPE
    fputs("--- New Tape\r\n", pfoDebug);
@@ -1056,11 +1056,11 @@ int tape_insert_cdt (FILE *pfile)
       bID = *pbBlock++;
       switch(bID) {
          case 0x10: // standard speed data block
-            iBlockLength = *reinterpret_cast<word *>(pbBlock+2) + 4;
+            iBlockLength = load_le16(pbBlock+2) + 4;
             bolGotDataBlock = true;
             break;
          case 0x11: // turbo loading data block
-            iBlockLength = (*reinterpret_cast<dword *>(pbBlock+0x0f) & 0x00ffffff) + 0x12;
+            iBlockLength = (load_le32(pbBlock+0x0f) & 0x00ffffff) + 0x12;
             bolGotDataBlock = true;
             break;
          case 0x12: // pure tone
@@ -1072,16 +1072,16 @@ int tape_insert_cdt (FILE *pfile)
             bolGotDataBlock = true;
             break;
          case 0x14: // pure data block
-            iBlockLength = (*reinterpret_cast<dword *>(pbBlock+0x07) & 0x00ffffff) + 0x0a;
+            iBlockLength = (load_le32(pbBlock+0x07) & 0x00ffffff) + 0x0a;
             bolGotDataBlock = true;
             break;
          case 0x15: // direct recording
-            iBlockLength = (*reinterpret_cast<dword *>(pbBlock+0x05) & 0x00ffffff) + 0x08;
+            iBlockLength = (load_le32(pbBlock+0x05) & 0x00ffffff) + 0x08;
             bolGotDataBlock = true;
             break;
          case 0x20: // pause
             if ((!bolGotDataBlock) && (pbBlock != &pbTapeImage[1])) {
-               *reinterpret_cast<word *>(pbBlock) = 0; // remove any pauses (execept ours) before the data starts
+               store_le16(pbBlock, 0); // remove any pauses (execept ours) before the data starts
             }
             iBlockLength = 2;
             break;
@@ -1109,7 +1109,7 @@ int tape_insert_cdt (FILE *pfile)
          case 0x26: // call sequence
             LOG_ERROR("Couldn't load CDT file: unsupported block ID: " << bID);
             return ERR_TAP_UNSUPPORTED;
-            iBlockLength = (*reinterpret_cast<word *>(pbBlock) * 2) + 2;
+            iBlockLength = (load_le16(pbBlock) * 2) + 2;
             break;
          case 0x27: // return from sequence
             LOG_ERROR("Couldn't load CDT file: unsupported block ID: " << bID);
@@ -1119,7 +1119,7 @@ int tape_insert_cdt (FILE *pfile)
          case 0x28: // select block
             LOG_ERROR("Couldn't load CDT file: unsupported block ID: " << bID);
             return ERR_TAP_UNSUPPORTED;
-            iBlockLength = *reinterpret_cast<word *>(pbBlock) + 2;
+            iBlockLength = load_le16(pbBlock) + 2;
             break;
          case 0x30: // text description
             iBlockLength = *pbBlock + 1;
@@ -1128,7 +1128,7 @@ int tape_insert_cdt (FILE *pfile)
             iBlockLength = *(pbBlock+1) + 2;
             break;
          case 0x32: // archive info
-            iBlockLength = *reinterpret_cast<word *>(pbBlock) + 2;
+            iBlockLength = load_le16(pbBlock) + 2;
             break;
          case 0x33: // hardware type
             iBlockLength = (*pbBlock * 3) + 1;
@@ -1137,17 +1137,17 @@ int tape_insert_cdt (FILE *pfile)
             iBlockLength = 8;
             break;
          case 0x35: // custom info block
-            iBlockLength = *reinterpret_cast<dword *>(pbBlock+0x10) + 0x14;
+            iBlockLength = load_le32(pbBlock+0x10) + 0x14;
             break;
          case 0x40: // snapshot block
-            iBlockLength = (*reinterpret_cast<dword *>(pbBlock+0x01) & 0x00ffffff) + 0x04;
+            iBlockLength = (load_le32(pbBlock+0x01) & 0x00ffffff) + 0x04;
             break;
          case 0x5A: // another tzx/cdt file
             iBlockLength = 9;
             break;
 
          default: // "extension rule"
-            iBlockLength = *reinterpret_cast<dword *>(pbBlock) + 4;
+            iBlockLength = load_le32(pbBlock) + 4;
       }
 
       #ifdef DEBUG_TAPE
@@ -1183,7 +1183,7 @@ int tape_insert_voc (FILE *pfile)
      return ERR_TAP_BAD_VOC;
    }
    lOffset =
-   lInitialOffset = *reinterpret_cast<word *>(pbPtr + 0x14);
+   lInitialOffset = load_le16(pbPtr + 0x14);
    lFileSize = file_size(fileno(pfile));
    if ((lFileSize-26) <= 0) { // should have at least one block...
      LOG_ERROR("Reading VOC file: Invalid VOC file: no block");
@@ -1204,14 +1204,14 @@ int tape_insert_voc (FILE *pfile)
         return ERR_TAP_BAD_VOC;
       }
       #ifdef DEBUG_TAPE
-      fprintf(pfoDebug, "%02x %d\r\n", *pbPtr, *(dword *)(pbPtr+0x01) & 0x00ffffff);
+      fprintf(pfoDebug, "%02x %d\r\n", *pbPtr, load_le32(pbPtr+0x01) & 0x00ffffff);
       #endif
       switch(*pbPtr) {
          case 0x0: // terminator
             bolDone = true;
             break;
          case 0x1: // sound data
-            iBlockLength = (*reinterpret_cast<dword *>(pbPtr+0x01) & 0x00ffffff) + 4;
+            iBlockLength = (load_le32(pbPtr+0x01) & 0x00ffffff) + 4;
             lSampleLength += iBlockLength - 6;
             if ((bSampleRate) && (bSampleRate != *(pbPtr+0x04))) { // no change in sample rate allowed
                LOG_ERROR("Reading VOC file: unsupported change in sample rate");
@@ -1224,12 +1224,12 @@ int tape_insert_voc (FILE *pfile)
             }
             break;
          case 0x2: // sound continue
-            iBlockLength = (*reinterpret_cast<dword *>(pbPtr+0x01) & 0x00ffffff) + 4;
+            iBlockLength = (load_le32(pbPtr+0x01) & 0x00ffffff) + 4;
             lSampleLength += iBlockLength - 4;
             break;
          case 0x3: // silence
             iBlockLength = 4;
-            lSampleLength += *reinterpret_cast<word *>(pbPtr+0x01) + 1;
+            lSampleLength += load_le16(pbPtr+0x01) + 1;
             if ((bSampleRate) && (bSampleRate != *(pbPtr+0x03))) { // no change in sample rate allowed
                LOG_ERROR("Reading VOC file: unsupported change in sample rate");
                return ERR_TAP_BAD_VOC;
@@ -1240,7 +1240,7 @@ int tape_insert_voc (FILE *pfile)
             iBlockLength = 3;
             break;
          case 0x5: // ascii
-            iBlockLength = (*reinterpret_cast<dword *>(pbPtr+0x01) & 0x00ffffff) + 4;
+            iBlockLength = (load_le32(pbPtr+0x01) & 0x00ffffff) + 4;
             break;
          case 0x6: // repeat
             LOG_ERROR("Reading VOC file: unsupported repeat block");
@@ -1272,13 +1272,13 @@ int tape_insert_voc (FILE *pfile)
    }
    pbTapeImage.resize(dwCompressedSize+1+8+6);
    pbTapeImage[0] = 0x20; // start off with a pause block
-   *reinterpret_cast<word *>(&pbTapeImage[1]) = 2000; // set the length to 2 seconds
+   store_le16(&pbTapeImage[1], 2000); // set the length to 2 seconds
 
    *(&pbTapeImage[3]) = 0x15; // direct recording block
-   *reinterpret_cast<word *>(&pbTapeImage[4]) = static_cast<word>(dwTapePulseCycles); // number of T states per sample
-   *reinterpret_cast<word *>(&pbTapeImage[6]) = 0; // pause after block
+   store_le16(&pbTapeImage[4], static_cast<word>(dwTapePulseCycles)); // number of T states per sample
+   store_le16(&pbTapeImage[6], 0); // pause after block
    pbTapeImage[8] = lSampleLength & 7 ? lSampleLength & 7 : 8; // bits used in last byte
-   *reinterpret_cast<dword *>(&pbTapeImage[9]) = dwCompressedSize & 0x00ffffff; // data length
+   store_le32(&pbTapeImage[9], dwCompressedSize & 0x00ffffff); // data length
    pbTapeImagePtr = &pbTapeImage[12];
 
    lOffset = lInitialOffset;
@@ -1300,7 +1300,7 @@ int tape_insert_voc (FILE *pfile)
               LOG_ERROR("Reading VOC file: error reading sound data");
               return ERR_TAP_BAD_VOC;
             }
-            iBlockLength = (*reinterpret_cast<dword *>(pbPtr) & 0x00ffffff) + 4;
+            iBlockLength = (load_le32(pbPtr) & 0x00ffffff) + 4;
             lSampleLength = iBlockLength - 6;
             pbVocDataBlock = new byte[lSampleLength];
             if(fread(pbVocDataBlock, lSampleLength, 1, pfile) != 1) {
@@ -1327,7 +1327,7 @@ int tape_insert_voc (FILE *pfile)
               LOG_ERROR("Reading VOC file: error reading sound continue");
               return ERR_TAP_BAD_VOC;
             }
-            iBlockLength = (*reinterpret_cast<dword *>(pbPtr) & 0x00ffffff) + 4;
+            iBlockLength = (load_le32(pbPtr) & 0x00ffffff) + 4;
             lSampleLength = iBlockLength - 4;
             pbVocDataBlock = new byte[lSampleLength];
             if(fread(pbVocDataBlock, lSampleLength, 1, pfile) != 1) {
@@ -1351,7 +1351,7 @@ int tape_insert_voc (FILE *pfile)
             break;
          case 0x3: // silence
             iBlockLength = 4;
-            lSampleLength = *reinterpret_cast<word *>(pbPtr) + 1;
+            lSampleLength = load_le16(pbPtr) + 1;
             for (int iBytePos = 0; iBytePos < lSampleLength; iBytePos++) {
                dwBit--;
                if (!dwBit) { // got all 8 bits?
@@ -1365,7 +1365,7 @@ int tape_insert_voc (FILE *pfile)
             iBlockLength = 3;
             break;
          case 0x5: // ascii
-            iBlockLength = (*reinterpret_cast<dword *>(pbPtr) & 0x00ffffff) + 4;
+            iBlockLength = (load_le32(pbPtr) & 0x00ffffff) + 4;
             break;
          default:
             LOG_ERROR("Reading VOC file: unsupported unknown block type: " << static_cast<int>(*pbPtr));
@@ -1375,7 +1375,7 @@ int tape_insert_voc (FILE *pfile)
    }
 
    *pbTapeImagePtr = 0x20; // end with a pause block
-   *reinterpret_cast<word *>(pbTapeImagePtr+1) = 2000; // set the length to 2 seconds
+   store_le16(pbTapeImagePtr+1, 2000); // set the length to 2 seconds
 
    pbTapeImageEnd = pbTapeImagePtr + 3;
 

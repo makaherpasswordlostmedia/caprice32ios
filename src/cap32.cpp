@@ -1005,12 +1005,21 @@ void print (byte *pbAddr, const char *pchStr, bool bolColour)
                bRow = bFont[iIdx]; // get the bitmap information for one row
                for (int iCol = 0; iCol < FNT_CHAR_WIDTH; iCol++) { // loop for all columns in the font character
                   if (bRow & 0x80) { // is the bit set?
-                     *(reinterpret_cast<dword *>(pbPixel)) = dwColour; // draw the character pixel
-                     *(reinterpret_cast<dword *>(pbPixel+CPC.scr_bps)) = dwColour; // draw the second line in case dwYScale == 2 (will be overwritten by shadow otherwise)
-                     *(reinterpret_cast<dword *>(pbPixel+1)) = 0; // draw the "shadow" on the right
-                     *(reinterpret_cast<dword *>(pbPixel+CPC.scr_bps)+1) = 0; // second line of shadow on the right
-                     *(reinterpret_cast<dword *>(pbPixel+CPC.scr_line_offs)) = 0; // shadow on the line below
-                     *(reinterpret_cast<dword *>(pbPixel+CPC.scr_line_offs)+1) = 0; // shadow below & on the right
+                     // pbPixel advances by 3 bytes/pixel in this loop, so it
+                     // is on a 4-aligned address only 1 time in 4 - a
+                     // reinterpret_cast<dword*> store here is a
+                     // strict-alignment access on ARM and SIGBUSes
+                     // (EXC_ARM_DA_ALIGN) as soon as it lands on a
+                     // non-4-aligned pbPixel. store_le32 is alignment-safe.
+                     store_le32(pbPixel, dwColour); // draw the character pixel
+                     store_le32(pbPixel+CPC.scr_bps, dwColour); // draw the second line in case dwYScale == 2 (will be overwritten by shadow otherwise)
+                     store_le32(pbPixel+1, 0); // draw the "shadow" on the right
+                     // NOTE: original code was `*(reinterpret_cast<dword*>(pbPixel+CPC.scr_bps)+1)` -
+                     // the +1 there applies AFTER the cast to dword*, i.e. +4 bytes, not +1 byte.
+                     store_le32(pbPixel+CPC.scr_bps+4, 0); // second line of shadow on the right
+                     store_le32(pbPixel+CPC.scr_line_offs, 0); // shadow on the line below
+                     // Same +1-after-cast-to-dword* subtlety as above: +4 bytes.
+                     store_le32(pbPixel+CPC.scr_line_offs+4, 0); // shadow below & on the right
                   }
                   pbPixel += 3; // update the screen position
                   bRow <<= 1; // advance to the next bit
@@ -1037,12 +1046,21 @@ void print (byte *pbAddr, const char *pchStr, bool bolColour)
                bRow = bFont[iIdx]; // get the bitmap information for one row
                for (int iCol = 0; iCol < FNT_CHAR_WIDTH; iCol++) { // loop for all columns in the font character
                   if (bRow & 0x80) { // is the bit set?
-                     *(reinterpret_cast<word *>(pbPixel)) = wColour; // draw the character pixel
-                     *(reinterpret_cast<word *>(pbPixel+CPC.scr_bps)) = wColour; // draw the second line in case dwYScale == 2 (will be overwritten by shadow otherwise)
-                     *(reinterpret_cast<word *>(pbPixel)+1) = 0; // draw the "shadow" on the right
-                     *(reinterpret_cast<word *>(pbPixel+CPC.scr_bps)+1) = 0; // second line of shadow on the right
-                     *(reinterpret_cast<word *>(pbPixel+CPC.scr_line_offs)) = 0; // shadow on the line below
-                     *(reinterpret_cast<word *>(pbPixel+CPC.scr_line_offs)+1) = 0; // shadow below & on the right
+                     // pbPixel advances by 2 bytes/pixel here, so it's always
+                     // 2-aligned - a word* store would actually be safe in
+                     // this specific loop. Converted anyway for consistency
+                     // with the 24bpp version above and so a future change
+                     // to the stride here doesn't silently reintroduce the
+                     // SIGBUS risk. store_le16 has no alignment requirement.
+                     // NOTE: `reinterpret_cast<word*>(pbPixel)+1` in the
+                     // original means +2 bytes (pointer arithmetic happens
+                     // after the cast to word*), not +1 byte.
+                     store_le16(pbPixel, wColour); // draw the character pixel
+                     store_le16(pbPixel+CPC.scr_bps, wColour); // draw the second line in case dwYScale == 2 (will be overwritten by shadow otherwise)
+                     store_le16(pbPixel+2, 0); // draw the "shadow" on the right
+                     store_le16(pbPixel+CPC.scr_bps+2, 0); // second line of shadow on the right
+                     store_le16(pbPixel+CPC.scr_line_offs, 0); // shadow on the line below
+                     store_le16(pbPixel+CPC.scr_line_offs+2, 0); // shadow below & on the right
                   }
                   pbPixel += 2; // update the screen position
                   bRow <<= 1; // advance to the next bit
