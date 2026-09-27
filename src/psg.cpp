@@ -351,20 +351,29 @@ void SetAYRegister(int Num, byte Value)
 
 
 
+// PSG.RegisterAY only stores individual bytes (see cap32.h) since a 16-bit
+// view overlaid on the same storage caused unaligned accesses/SIGBUS on
+// ARM. Combine the Lo/Hi byte pairs here instead - plain byte reads, no
+// alignment requirement.
+static inline unsigned short AY_TonA() { return static_cast<unsigned short>(PSG.RegisterAY.TonALo | (PSG.RegisterAY.TonAHi << 8)); }
+static inline unsigned short AY_TonB() { return static_cast<unsigned short>(PSG.RegisterAY.TonBLo | (PSG.RegisterAY.TonBHi << 8)); }
+static inline unsigned short AY_TonC() { return static_cast<unsigned short>(PSG.RegisterAY.TonCLo | (PSG.RegisterAY.TonCHi << 8)); }
+static inline unsigned short AY_Envelope() { return static_cast<unsigned short>(PSG.RegisterAY.EnvelopeLo | (PSG.RegisterAY.EnvelopeHi << 8)); }
+
 inline void Synthesizer_Logic_Q()
 {
    Ton_Counter_A.Hi++;
-   if (Ton_Counter_A.Hi >= PSG.RegisterAY.TonA) {
+   if (Ton_Counter_A.Hi >= AY_TonA()) {
       Ton_Counter_A.Hi = 0;
       Ton_A ^= 1;
    }
    Ton_Counter_B.Hi++;
-   if (Ton_Counter_B.Hi >= PSG.RegisterAY.TonB) {
+   if (Ton_Counter_B.Hi >= AY_TonB()) {
       Ton_Counter_B.Hi = 0;
       Ton_B ^= 1;
    }
    Ton_Counter_C.Hi++;
-   if (Ton_Counter_C.Hi >= PSG.RegisterAY.TonC) {
+   if (Ton_Counter_C.Hi >= AY_TonC()) {
       Ton_Counter_C.Hi = 0;
       Ton_C ^= 1;
    }
@@ -377,7 +386,7 @@ inline void Synthesizer_Logic_Q()
       Case_EnvType();
    }
    Envelope_Counter.Hi++;
-   if (Envelope_Counter.Hi >= PSG.RegisterAY.Envelope) {
+   if (Envelope_Counter.Hi >= AY_Envelope()) {
       Envelope_Counter.Hi = 0;
    }
 }
@@ -395,7 +404,7 @@ inline void Synthesizer_Mixer_Q()
 
    LevR = LevL;
    if (Ton_EnA) {
-      if ((!Envelope_EnA) || (PSG.RegisterAY.TonA > 4)) {
+      if ((!Envelope_EnA) || (AY_TonA() > 4)) {
          k = Ton_A;
       }
       else {
@@ -420,7 +429,7 @@ inline void Synthesizer_Mixer_Q()
    }
 
    if (Ton_EnB) {
-      if ((!Envelope_EnB) || (PSG.RegisterAY.TonB > 4)) {
+      if ((!Envelope_EnB) || (AY_TonB() > 4)) {
          k = Ton_B;
       }
       else {
@@ -445,7 +454,7 @@ inline void Synthesizer_Mixer_Q()
    }
 
    if (Ton_EnC) {
-      if ((!Envelope_EnC) || (PSG.RegisterAY.TonC > 4)) {
+      if ((!Envelope_EnC) || (AY_TonC() > 4)) {
          k = Ton_C;
       }
       else {
@@ -488,7 +497,15 @@ void Synthesizer_Stereo16()
    reg_pair val;
    val.w.l = Left_Chan / Tick_Counter;
    val.w.h = Right_Chan / Tick_Counter;
-   *reinterpret_cast<dword *>(CPC.snd_bufferptr) = val.d; // write to mixing buffer
+   // Written via store_le32 rather than a direct dword* store: although
+   // snd_bufferptr only ever resets to pbSndBuffer.get() and advances by a
+   // fixed stride while a given Synthesizer_* function is active, that
+   // stride differs between the mixer variants (4/2/1 bytes) and nothing
+   // enforces which variant runs first after a reset, so an aligned start
+   // isn't actually guaranteed here. store_le32 removes the assumption
+   // entirely - see the SIGBUS explanation in psg.cpp's SetAYRegister
+   // history / cap32.h RegisterAY comment for the underlying mechanism.
+   store_le32(CPC.snd_bufferptr, val.d); // write to mixing buffer
    CPC.snd_bufferptr += 4;
    Left_Chan = 0;
    Right_Chan = Left_Chan;
@@ -513,7 +530,7 @@ void Synthesizer_Stereo8()
    reg_pair val;
    val.b.l = 128 + Left_Chan / Tick_Counter;
    val.b.h = 128 + Right_Chan / Tick_Counter;
-   *reinterpret_cast<word *>(CPC.snd_bufferptr) = val.w.l; // write to mixing buffer
+   store_le16(CPC.snd_bufferptr, val.w.l); // write to mixing buffer
    CPC.snd_bufferptr += 2;
    Left_Chan = 0;
    Right_Chan = Left_Chan;
@@ -535,7 +552,7 @@ inline void Synthesizer_Mixer_Q_Mono()
    }
 
    if (Ton_EnA) {
-      if ((!Envelope_EnA) || (PSG.RegisterAY.TonA > 4)) {
+      if ((!Envelope_EnA) || (AY_TonA() > 4)) {
          k = Ton_A;
       }
       else {
@@ -558,7 +575,7 @@ inline void Synthesizer_Mixer_Q_Mono()
    }
 
    if (Ton_EnB) {
-      if ((!Envelope_EnB) || (PSG.RegisterAY.TonB > 4)) {
+      if ((!Envelope_EnB) || (AY_TonB() > 4)) {
          k = Ton_B;
       }
       else {
@@ -581,7 +598,7 @@ inline void Synthesizer_Mixer_Q_Mono()
    }
 
    if (Ton_EnC) {
-      if ((!Envelope_EnC) || (PSG.RegisterAY.TonC > 4)) {
+      if ((!Envelope_EnC) || (AY_TonC() > 4)) {
          k = Ton_C;
       }
       else {
@@ -618,7 +635,7 @@ void Synthesizer_Mono16()
       LoopCount.Hi--;
    }
    LoopCount.add_Re(LoopCountInit);
-   *reinterpret_cast<word *>(CPC.snd_bufferptr) = Left_Chan / Tick_Counter; // write to mixing buffer
+   store_le16(CPC.snd_bufferptr, static_cast<word>(Left_Chan / Tick_Counter)); // write to mixing buffer
    CPC.snd_bufferptr += 2;
    Left_Chan = 0;
    if (CPC.snd_bufferptr >= pbSndBufferEnd) {

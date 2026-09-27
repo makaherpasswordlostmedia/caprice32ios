@@ -34,6 +34,7 @@
 #include "cap32.h"
 #include "log.h"
 #include "glfuncs.h"
+#include "crashlog.h"
 #ifdef HAVE_GL
 #include "SDL_opengl.h"
 #endif
@@ -141,7 +142,8 @@ void compute_scale(video_plugin* t, int w, int h)
 /* ------------------------------------------------------------------------------------ */
 SDL_Surface* direct_init(video_plugin* t, int scale, bool fs)
 {
-  SDL_CreateWindowAndRenderer(CPC_VISIBLE_SCR_WIDTH*scale, CPC_VISIBLE_SCR_HEIGHT*scale, (fs?CAP32_FULLSCREEN_FLAG:SDL_WINDOW_SHOWN), &mainSDLWindow, &renderer);
+  CRASH_CHECKPOINT("direct_init: before SDL_CreateWindowAndRenderer");
+  SDL_CreateWindowAndRenderer(CPC_VISIBLE_SCR_WIDTH*scale, CPC_VISIBLE_SCR_HEIGHT*scale, (fs?SDL_WINDOW_FULLSCREEN_DESKTOP:SDL_WINDOW_SHOWN), &mainSDLWindow, &renderer);
   if (!mainSDLWindow || !renderer) return nullptr;
   SDL_SetWindowTitle(mainSDLWindow, "Caprice32 " VERSION_STRING);
   int surface_width, surface_height;
@@ -154,12 +156,15 @@ SDL_Surface* direct_init(video_plugin* t, int scale, bool fs)
     surface_width = CPC_VISIBLE_SCR_WIDTH;
     surface_height = CPC_VISIBLE_SCR_HEIGHT;
   }
+  CRASH_CHECKPOINT("direct_init: before SDL_CreateRGBSurface");
   vid = SDL_CreateRGBSurface(0, surface_width, surface_height, renderer_bpp(renderer), 0, 0, 0, 0);
   if (!vid) return nullptr;
+  CRASH_CHECKPOINT("direct_init: before SDL_CreateTextureFromSurface");
   texture = SDL_CreateTextureFromSurface(renderer, vid);
   if (!texture) return nullptr;
   SDL_FillRect(vid, nullptr, SDL_MapRGB(vid->format,0,0,0));
   compute_scale(t, surface_width, surface_height);
+  CRASH_CHECKPOINT("direct_init: complete");
   return vid;
 }
 
@@ -217,7 +222,8 @@ SDL_Surface* glscale_init(video_plugin* t, int scale, bool fs)
 
   int width = CPC_VISIBLE_SCR_WIDTH*scale;
   int height = CPC_VISIBLE_SCR_HEIGHT*scale;
-  SDL_CreateWindowAndRenderer(width, height, (fs?CAP32_FULLSCREEN_FLAG:SDL_WINDOW_SHOWN) | SDL_WINDOW_OPENGL, &mainSDLWindow, &renderer);
+  CRASH_CHECKPOINT("lscale_init: before SDL_CreateWindowAndRenderer");
+  SDL_CreateWindowAndRenderer(width, height, (fs?SDL_WINDOW_FULLSCREEN_DESKTOP:SDL_WINDOW_SHOWN) | SDL_WINDOW_OPENGL, &mainSDLWindow, &renderer);
   if (!mainSDLWindow || !renderer) return nullptr;
   if (fs) {
     SDL_DisplayMode display;
@@ -225,18 +231,43 @@ SDL_Surface* glscale_init(video_plugin* t, int scale, bool fs)
     width = display.w;
     height = display.h;
   }
+  CRASH_CHECKPOINT("glscale_init: before SDL_CreateRGBSurface");
   vid = SDL_CreateRGBSurface(0, width, height, renderer_bpp(renderer), 0, 0, 0, 0);
   if (!vid) return nullptr;
+  CRASH_CHECKPOINT("glscale_init: before SDL_GL_CreateContext");
   glcontext = SDL_GL_CreateContext(mainSDLWindow);
+  if (!glcontext) {
+    // Previously unchecked: on hardware where GL context creation
+    // fails (observed on A5/SGX543 chips - iPad 2/3/mini 1, iPhone 4s -
+    // see the SDL_HINT_RENDER_DRIVER comment in cap32_main), execution
+    // fell through into init_glfuncs() and eglGetString(GL_VERSION)
+    // with no current context. That's a call through a resolved
+    // function pointer into a driver that has no context to operate
+    // on - on this PowerVR driver it doesn't return an error, it
+    // faults (SIGBUS), and since the crashing thread here is fresh
+    // with plenty of stack left, that fault *would* have reached
+    // crashlog's handler - except this path returns before any
+    // CRASH_CHECKPOINT existed in this function, so the log's last
+    // checkpoint was always one function above this and looked
+    // uninformative rather than obviously wrong. Fail cleanly instead.
+    fprintf(stderr, "SDL_GL_CreateContext failed: %s\n", SDL_GetError());
+    return nullptr;
+  }
+  CRASH_CHECKPOINT("glscale_init: before init_glfuncs");
   if (init_glfuncs()!=0)
   {
     fprintf(stderr, "Cannot init OpenGL functions: %s\n", SDL_GetError());
     return nullptr;
   }
 
+  CRASH_CHECKPOINT("glscale_init: before eglGetString(GL_VERSION)");
   int major, minor;
   const char *version;
   version = reinterpret_cast<const char *>(eglGetString(GL_VERSION));
+  if (!version) {
+    fprintf(stderr, "eglGetString(GL_VERSION) returned null\n");
+    return nullptr;
+  }
   if (sscanf(version, "%d.%d", &major, &minor) != 2) {
     fprintf(stderr, "Unable to get OpenGL version: got %s.\n", version);
     return nullptr;

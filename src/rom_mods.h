@@ -1,3 +1,6 @@
+#ifndef ROM_MODS_H
+#define ROM_MODS_H
+
 /* Caprice32 - Amstrad CPC Emulator
    (c) Copyright 1997-2005 Ulrich Doewich
 
@@ -321,3 +324,5 @@ static unsigned char cpc_charset[MAX_ROM_MODS][2048] = {
       0x18, 0x3C, 0x7E, 0x18, 0x18, 0x7E, 0x3C, 0x18, 0x00, 0x24, 0x66, 0xFF, 0x66, 0x24, 0x00, 0x00
    }
 };
+
+#endif // ROM_MODS_H

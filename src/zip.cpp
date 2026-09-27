@@ -46,10 +46,10 @@ namespace zip
       }
       pbPtr = pbGPBuffer + (256 - 22); // pointer to end of central directory (under ideal conditions)
       while (pbPtr != static_cast<byte *>(pbGPBuffer)) {
-        if (*reinterpret_cast<dword *>(pbPtr) == 0x06054b50) { // check for end of central directory signature
-          wCentralDirEntries = *reinterpret_cast<word *>(pbPtr + 10);
-          wCentralDirSize = *reinterpret_cast<word *>(pbPtr + 12);
-          dwCentralDirPosition = *reinterpret_cast<dword *>(pbPtr + 16);
+        if (load_le32(pbPtr) == 0x06054b50) { // check for end of central directory signature
+          wCentralDirEntries = load_le16(pbPtr + 10);
+          wCentralDirSize = load_le16(pbPtr + 12);
+          dwCentralDirPosition = load_le32(pbPtr + 16);
           break;
         }
         pbPtr--; // move backwards through buffer
@@ -71,9 +71,9 @@ namespace zip
     pbPtr = pbGPBuffer;
 
     for (n = wCentralDirEntries; n; n--) {
-      wFilenameLength = *reinterpret_cast<word *>(pbPtr + 28);
-      dwOffset = *reinterpret_cast<dword *>(pbPtr + 42);
-      dwNextEntry = wFilenameLength + *reinterpret_cast<word *>(pbPtr + 30) + *reinterpret_cast<word *>(pbPtr + 32);
+      wFilenameLength = load_le16(pbPtr + 28);
+      dwOffset = load_le32(pbPtr + 42);
+      dwNextEntry = wFilenameLength + load_le16(pbPtr + 30) + load_le16(pbPtr + 32);
       pbPtr += 46;
       const char *pchThisExtension = zi->extensions.c_str();
       while (*pchThisExtension != '\0') { // loop for all extensions to be checked
@@ -144,8 +144,8 @@ namespace zip
       fclose(*pfileOut);
       return ERR_FILE_UNZIP_FAILED;
     }
-    dwSize = *reinterpret_cast<dword *>(pbGPBuffer + 18); // length of compressed data
-    dwOffset += 30 + *reinterpret_cast<word *>(pbGPBuffer + 26) + *reinterpret_cast<word *>(pbGPBuffer + 28);
+    dwSize = load_le32(pbGPBuffer + 18); // length of compressed data
+    dwOffset += 30 + load_le16(pbGPBuffer + 26) + load_le16(pbGPBuffer + 28);
     if (fseek(pfileIn, dwOffset, SEEK_SET) != 0) {  // move file pointer to start of compressed data
       LOG_ERROR("Couldn't read zip file: " << zi.filename);
       fclose(*pfileOut);

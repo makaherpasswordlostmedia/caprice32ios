@@ -497,6 +497,39 @@ byte z80_IN_handler (reg_pair port)
 void z80_OUT_handler (reg_pair port, byte val)
 {
    LOG_DEBUG("OUT on port " << std::hex << static_cast<int>(port.w.l) << ", val=" << static_cast<int>(val) << std::dec);
+   // If mf2 was requested in the config but its ROM never got
+   // allocated (bad rom file, missing signature, etc - see the
+   // load-failure path that resets CPC.mf2 = 0, which may run after
+   // this function has already been called at least once with the old
+   // value), every *(pbMF2ROM + ...) write below is now skipped by the
+   // `&& pbMF2ROM` guards rather than dereferencing null. Log that
+   // exactly once (not per-OUT, which would spam this hot path) so
+   // it's visible in caprice32.log instead of just silently no-op'ing.
+   if (CPC.mf2 && !pbMF2ROM) {
+      static bool warned = false;
+      if (!warned) {
+         warned = true;
+         LOG_ERROR("mf2 is enabled in config but pbMF2ROM was never allocated - MF2 I/O writes are being silently skipped");
+      }
+   }
+   // Hot path, so record only in-memory (no disk write per call) - but
+   // this is exactly the function where several past crashes traced
+   // back to a null pbMF2ROM/pbCartridgePages[page] dereference, and
+   // the previous crashlog checkpoints only covered init/main-loop
+   // granularity, not which port/value triggered a specific OUT. If it
+   // happens again, "last checkpoint" in crashlog.txt will now show the
+   // exact port and value instead of just "main loop: before
+   // z80_execute", without needing a rebuild+repro cycle to add it.
+   // Can't use the CRASH_CHECKPOINT_FAST macro here: it string-literal-
+   // concatenates __FILE__ with its argument at compile time, which
+   // only works for literals, not this runtime-formatted buffer - call
+   // the underlying function directly instead.
+   {
+      char buf[96];
+      snprintf(buf, sizeof(buf), "src/cap32.cpp:z80_OUT_handler port=0x%04x val=0x%02x",
+               static_cast<unsigned>(port.w.l), static_cast<unsigned>(val));
+      crashlog::checkpoint_fast(buf);
+   }
    // Amstrad Magnum Phazer
    if ((port.b.h == 0xfb) && (port.b.l == 0xfe)) {
      // When the phazer is not pressed, the CRTC is constantly refreshing R16 & R17:
@@ -514,7 +547,15 @@ void z80_OUT_handler (reg_pair port, byte val)
             #endif
             GateArray.pen = val & 0x10 ? 0x10 : val & 0x0f; // if bit 5 is set, pen indexes the border colour
             LOG_DEBUG("Set pen value to " << static_cast<int>(GateArray.pen));
-            if (CPC.mf2) { // MF2 enabled?
+            if (CPC.mf2 && pbMF2ROM) { // MF2 enabled AND actually allocated?
+               // Previously checked CPC.mf2 alone. If mf2 support was
+               // requested in the config but pbMF2ROM's allocation
+               // never happened or was reverted (see the mf2 rom-file
+               // load failure path around line ~1310, which sets
+               // CPC.mf2 = 0 but only after this function may already
+               // have run once with the old value), this wrote through
+               // a null pointer at a fixed offset - a silent SIGSEGV/
+               // SIGBUS with no indication this was the cause.
                *(pbMF2ROM + 0x03fcf) = val;
             }
             break;
@@ -538,7 +579,7 @@ void z80_OUT_handler (reg_pair port, byte val)
                }
                // TODO: update pbRegisterPage
             }
-            if (CPC.mf2) { // MF2 enabled?
+            if (CPC.mf2 && pbMF2ROM) { // MF2 enabled AND actually allocated?
                int iPen = *(pbMF2ROM + 0x03fcf);
                *(pbMF2ROM + (0x03f90 | ((iPen & 0x10) << 2) | (iPen & 0x0f))) = val;
             }
@@ -558,7 +599,27 @@ void z80_OUT_handler (reg_pair port, byte val)
                int page = (val & 0x7);
                LOG_DEBUG("RMR2: Low bank rom = 0x" << std::hex << (4*membank) << std::dec << "000 - page " << page);
                GateArray.lower_ROM_bank = membank;
-               pbROMlo = pbCartridgePages[page];
+               if (pbCartridgePages[page] != nullptr) {
+                  pbROMlo = pbCartridgePages[page];
+               } else {
+                  // Previously assigned unconditionally. On a machine
+                  // with no cartridge loaded, every entry in
+                  // pbCartridgePages is null (see cartridge.cpp), so
+                  // this would page in a null pointer as the active
+                  // low ROM bank. The very next instruction fetch
+                  // through membank_read[0] then dereferences that
+                  // null pointer - a SIGBUS/SIGSEGV with no indication
+                  // of why, since asic.locked being unlocked and this
+                  // exact RMR2 sequence can occur during normal ROM
+                  // boot/detection code even on hardware this build
+                  // doesn't intend to emulate as Plus-range. Leave
+                  // pbROMlo pointing at whatever it already was
+                  // (the real OS ROM) rather than corrupting it.
+                  char buf[96];
+                  snprintf(buf, sizeof(buf), "src/cap32.cpp: RMR2 blocked null pbCartridgePages[%d] -> pbROMlo", page);
+                  crashlog::checkpoint(buf); // disk write: this is rare, not hot-path
+                  LOG_ERROR("RMR2 tried to page in empty cartridge slot " << page << " as low ROM - ignored");
+               }
                ga_memory_manager();
             } else {
                #ifdef DEBUG_GA
@@ -574,7 +635,7 @@ void z80_OUT_handler (reg_pair port, byte val)
                   z80.int_pending = 0; // clear pending interrupts
                   GateArray.sl_count = 0; // reset GA scanline counter
                }
-               if (CPC.mf2) { // MF2 enabled?
+               if (CPC.mf2 && pbMF2ROM) { // MF2 enabled AND actually allocated?
                   *(pbMF2ROM + 0x03fef) = val;
                }
             }
@@ -600,7 +661,7 @@ void z80_OUT_handler (reg_pair port, byte val)
      LOG_DEBUG("RAM config: " << std::hex << static_cast<int>(val) << std::dec);
      GateArray.RAM_config = val;
      ga_memory_manager();
-     if (CPC.mf2) { // MF2 enabled?
+     if (CPC.mf2 && pbMF2ROM) { // MF2 enabled AND actually allocated?
         *(pbMF2ROM + 0x03fff) = val;
      }
    }
@@ -613,7 +674,7 @@ void z80_OUT_handler (reg_pair port, byte val)
            asic_poke_lock_sequence(val);
          }
          CRTC.reg_select = val;
-         if (CPC.mf2) { // MF2 enabled?
+         if (CPC.mf2 && pbMF2ROM) { // MF2 enabled AND actually allocated?
             *(pbMF2ROM + 0x03cff) = val;
          }
       }
@@ -736,7 +797,7 @@ void z80_OUT_handler (reg_pair port, byte val)
                   break;
             }
          }
-         if (CPC.mf2) { // MF2 enabled?
+         if (CPC.mf2 && pbMF2ROM) { // MF2 enabled AND actually allocated?
             *(pbMF2ROM + (0x03db0 | (*(pbMF2ROM + 0x03cff) & 0x0f))) = val;
          }
          #ifdef DEBUG_CRTC
@@ -763,12 +824,23 @@ void z80_OUT_handler (reg_pair port, byte val)
             page = val & 31;
          }
          GateArray.upper_ROM = page;
-         pbExpansionROM = pbCartridgePages[page];
+         if (pbCartridgePages[page] != nullptr) {
+            pbExpansionROM = pbCartridgePages[page];
+         } else {
+            // leave pbExpansionROM pointing at whatever ROM was
+            // already paged in (same reasoning as the pbROMlo case above -
+            // an unpopulated cartridge slot must not page in a null
+            // pointer as active memory).
+            char buf[96];
+            snprintf(buf, sizeof(buf), "src/cap32.cpp: ROM select blocked null pbCartridgePages[%u] -> pbExpansionROM", page);
+            crashlog::checkpoint(buf); // disk write: this is rare, not hot-path
+            LOG_ERROR("ROM select tried to page in empty cartridge slot " << page << " as expansion ROM - ignored");
+         }
       }
       if (!(GateArray.ROM_config & 0x08)) { // upper/expansion ROM is enabled?
          membank_read[3] = pbExpansionROM; // 'page in' upper/expansion ROM
       }
-      if (CPC.mf2) { // MF2 enabled?
+      if (CPC.mf2 && pbMF2ROM) { // MF2 enabled AND actually allocated?
          *(pbMF2ROM + 0x03aac) = val;
       }
    }
@@ -840,7 +912,7 @@ void z80_OUT_handler (reg_pair port, byte val)
                   psg_write
                }
             }
-            if (CPC.mf2) { // MF2 enabled?
+            if (CPC.mf2 && pbMF2ROM) { // MF2 enabled AND actually allocated?
                *(pbMF2ROM + 0x037ff) = val;
             }
             break;
@@ -933,12 +1005,21 @@ void print (byte *pbAddr, const char *pchStr, bool bolColour)
                bRow = bFont[iIdx]; // get the bitmap information for one row
                for (int iCol = 0; iCol < FNT_CHAR_WIDTH; iCol++) { // loop for all columns in the font character
                   if (bRow & 0x80) { // is the bit set?
-                     *(reinterpret_cast<dword *>(pbPixel)) = dwColour; // draw the character pixel
-                     *(reinterpret_cast<dword *>(pbPixel+CPC.scr_bps)) = dwColour; // draw the second line in case dwYScale == 2 (will be overwritten by shadow otherwise)
-                     *(reinterpret_cast<dword *>(pbPixel+1)) = 0; // draw the "shadow" on the right
-                     *(reinterpret_cast<dword *>(pbPixel+CPC.scr_bps)+1) = 0; // second line of shadow on the right
-                     *(reinterpret_cast<dword *>(pbPixel+CPC.scr_line_offs)) = 0; // shadow on the line below
-                     *(reinterpret_cast<dword *>(pbPixel+CPC.scr_line_offs)+1) = 0; // shadow below & on the right
+                     // pbPixel advances by 3 bytes/pixel in this loop, so it
+                     // is on a 4-aligned address only 1 time in 4 - a
+                     // reinterpret_cast<dword*> store here is a
+                     // strict-alignment access on ARM and SIGBUSes
+                     // (EXC_ARM_DA_ALIGN) as soon as it lands on a
+                     // non-4-aligned pbPixel. store_le32 is alignment-safe.
+                     store_le32(pbPixel, dwColour); // draw the character pixel
+                     store_le32(pbPixel+CPC.scr_bps, dwColour); // draw the second line in case dwYScale == 2 (will be overwritten by shadow otherwise)
+                     store_le32(pbPixel+1, 0); // draw the "shadow" on the right
+                     // NOTE: original code was `*(reinterpret_cast<dword*>(pbPixel+CPC.scr_bps)+1)` -
+                     // the +1 there applies AFTER the cast to dword*, i.e. +4 bytes, not +1 byte.
+                     store_le32(pbPixel+CPC.scr_bps+4, 0); // second line of shadow on the right
+                     store_le32(pbPixel+CPC.scr_line_offs, 0); // shadow on the line below
+                     // Same +1-after-cast-to-dword* subtlety as above: +4 bytes.
+                     store_le32(pbPixel+CPC.scr_line_offs+4, 0); // shadow below & on the right
                   }
                   pbPixel += 3; // update the screen position
                   bRow <<= 1; // advance to the next bit
@@ -965,12 +1046,21 @@ void print (byte *pbAddr, const char *pchStr, bool bolColour)
                bRow = bFont[iIdx]; // get the bitmap information for one row
                for (int iCol = 0; iCol < FNT_CHAR_WIDTH; iCol++) { // loop for all columns in the font character
                   if (bRow & 0x80) { // is the bit set?
-                     *(reinterpret_cast<word *>(pbPixel)) = wColour; // draw the character pixel
-                     *(reinterpret_cast<word *>(pbPixel+CPC.scr_bps)) = wColour; // draw the second line in case dwYScale == 2 (will be overwritten by shadow otherwise)
-                     *(reinterpret_cast<word *>(pbPixel)+1) = 0; // draw the "shadow" on the right
-                     *(reinterpret_cast<word *>(pbPixel+CPC.scr_bps)+1) = 0; // second line of shadow on the right
-                     *(reinterpret_cast<word *>(pbPixel+CPC.scr_line_offs)) = 0; // shadow on the line below
-                     *(reinterpret_cast<word *>(pbPixel+CPC.scr_line_offs)+1) = 0; // shadow below & on the right
+                     // pbPixel advances by 2 bytes/pixel here, so it's always
+                     // 2-aligned - a word* store would actually be safe in
+                     // this specific loop. Converted anyway for consistency
+                     // with the 24bpp version above and so a future change
+                     // to the stride here doesn't silently reintroduce the
+                     // SIGBUS risk. store_le16 has no alignment requirement.
+                     // NOTE: `reinterpret_cast<word*>(pbPixel)+1` in the
+                     // original means +2 bytes (pointer arithmetic happens
+                     // after the cast to word*), not +1 byte.
+                     store_le16(pbPixel, wColour); // draw the character pixel
+                     store_le16(pbPixel+CPC.scr_bps, wColour); // draw the second line in case dwYScale == 2 (will be overwritten by shadow otherwise)
+                     store_le16(pbPixel+2, 0); // draw the "shadow" on the right
+                     store_le16(pbPixel+CPC.scr_bps+2, 0); // second line of shadow on the right
+                     store_le16(pbPixel+CPC.scr_line_offs, 0); // shadow on the line below
+                     store_le16(pbPixel+CPC.scr_line_offs+2, 0); // shadow below & on the right
                   }
                   pbPixel += 2; // update the screen position
                   bRow <<= 1; // advance to the next bit
@@ -1018,10 +1108,14 @@ void print (byte *pbAddr, const char *pchStr, bool bolColour)
 int emulator_patch_ROM ()
 {
    byte *pbPtr;
+   CRASH_CHECKPOINT("emulator_patch_ROM: entered");
 
    if(CPC.model <= 2) { // Normal CPC range
       std::string romFilename = CPC.rom_path + "/" + chROMFile[CPC.model];
+      fprintf(stderr, "emulator_patch_ROM: loading OS ROM '%s' for model %u\n", romFilename.c_str(), CPC.model);
+      fflush(stderr);
       if ((pfileObject = fopen(romFilename.c_str(), "rb")) != nullptr) { // load CPC OS + Basic
+         CRASH_CHECKPOINT("emulator_patch_ROM: before fread OS ROM");
          if(fread(pbROM, 2*16384, 1, pfileObject) != 1) {
             fclose(pfileObject);
             LOG_ERROR("Couldn't read ROM file '" << romFilename << "'");
@@ -1036,11 +1130,26 @@ int emulator_patch_ROM ()
    } else { // Plus range
       if (pbCartridgePages[0] != nullptr) {
          pbROMlo = pbCartridgePages[0];
+      } else {
+         // Previously silent: with no cartridge loaded, pbROMlo was
+         // left pointing at pbROM, which at this point is freshly
+         // new'd but never written to (see the buffer allocations
+         // above - no memset) or loaded from any file in this branch.
+         // The Z80 would then execute whatever uninitialized heap
+         // garbage happened to be there as if it were real CPC OS ROM
+         // code, wandering to an arbitrary PC and eventually faulting
+         // - the exact SIGBUS this was chased down from. A Plus model
+         // with no cartridge has no ROM to run; fail explicitly.
+         LOG_ERROR("Plus range model selected with no cartridge loaded: no ROM to boot from");
+         return ERR_CPC_ROM_MISSING;
       }
    }
 
    // Patch ROM for non-english keyboards
    if (CPC.keyboard) {
+      CRASH_CHECKPOINT("emulator_patch_ROM: before keyboard patch memcpy");
+      fprintf(stderr, "emulator_patch_ROM: patching keyboard layout %u for model %u\n", CPC.keyboard, CPC.model);
+      fflush(stderr);
       pbPtr = pbROMlo;
       switch(CPC.model) {
          case 0: // 464
@@ -1063,6 +1172,7 @@ int emulator_patch_ROM ()
       }
    }
 
+   CRASH_CHECKPOINT("emulator_patch_ROM: done");
    return 0;
 }
 
@@ -1167,6 +1277,18 @@ int emulator_init ()
    // Ensure 1 byte is available before pbRAM as prerender_normal*_plus can read it
    pbRAM = pbRAMbuffer + 1;
    pbROM = new byte [32*1024]; // allocate memory for 32K of ROM
+   // Zero it rather than leaving it as raw new'd heap garbage: every
+   // path that's supposed to fill this (the CPC.model <= 2 ROM file
+   // load, or a Plus cartridge) either populates it or now bails out
+   // with an error above/below - but zeroing here means any future gap
+   // in that coverage decodes as a long run of Z80 NOPs (0x00) instead
+   // of arbitrary uninitialized bytes that can be decoded as anything,
+   // including opcodes that jump PC to an unrelated unaligned address.
+   // That was the underlying mechanism of the SIGBUS this was
+   // originally chased from - a wrong CPC.model let pbROM stay
+   // unfilled, and the garbage that happened to already be there got
+   // executed as code.
+   memset(pbROM, 0, 32*1024);
    pbRegisterPage = new byte [16*1024];
    pbROMlo = pbROM;
    pbROMhi =
@@ -1183,6 +1305,7 @@ int emulator_init ()
 
    for (iRomNum = 0; iRomNum < 16; iRomNum++) { // loop for ROMs 0-15
       if (!CPC.rom_file[iRomNum].empty()) { // is a ROM image specified for this slot?
+         CRASH_CHECKPOINT_FAST("emulator_init: loading ROM slot");
          std::string rom_file = CPC.rom_file[iRomNum];
          if (rom_file == "DEFAULT") {
            // On 464, there's no AMSDOS by default.
@@ -1323,6 +1446,31 @@ void emulator_shutdown ()
 void bin_load (const std::string& filename, const size_t offset)
 {
   LOG_INFO("Load " << filename << " in memory at offset 0x" << std::hex << offset);
+  CRASH_CHECKPOINT("bin_load: entered");
+  fprintf(stderr, "bin_load: file='%s' offset=0x%zx ram_size=%uKB\n",
+          filename.c_str(), offset, CPC.ram_size);
+  fflush(stderr);
+
+  // The real allocated buffer is pbRAMbuffer, sized CPC.ram_size*1024+1
+  // bytes (see emulator_init) - not the fixed 0xFFFF this used to assume.
+  // offset comes straight from a user/CLI argument (args.binOffset,
+  // parsed in argparse.cpp) with no prior validation. Two failure modes
+  // this was open to:
+  //   1. offset > actual RAM size: fread() below would write straight
+  //      past the end of pbRAMbuffer into whatever heap memory follows
+  //      it - a straightforward heap overflow from an untrusted CLI arg.
+  //   2. offset > 0xFFFF specifically: "ram_size - offset" (both
+  //      size_t/unsigned) underflows to a huge number, so max_size
+  //      wraps around to near SIZE_MAX and fread is told it may write
+  //      practically unbounded data into a 1-64KB buffer.
+  // Bail out cleanly instead of letting either happen.
+  size_t actual_ram_size = static_cast<size_t>(CPC.ram_size) * 1024;
+  if (offset >= actual_ram_size) {
+    LOG_ERROR("bin_load: offset 0x" << std::hex << offset << " is outside the "
+              << std::dec << CPC.ram_size << "KB RAM - refusing to load");
+    return;
+  }
+
   FILE *file;
   if ((file = fopen(filename.c_str(), "rb")) == nullptr) {
     LOG_ERROR("File not found: " << filename);
@@ -1332,8 +1480,8 @@ void bin_load (const std::string& filename, const size_t offset)
   auto closure = [&]() { fclose(file); };
   memutils::scope_exit<decltype(closure)> cs(closure); // TODO: when C++20, can become a one liner expression.
 
-  size_t ram_size = 0XFFFF; // TODO: Find a way to have the real RAM size
-  size_t max_size = ram_size - offset;
+  size_t ram_size = actual_ram_size; // real buffer size, not a fixed 0xFFFF
+  size_t max_size = ram_size - offset; // safe: offset < ram_size, checked above
   size_t read = fread(&pbRAM[offset], 1, max_size, file);
   if (!feof(file)) {
     LOG_ERROR("Bin file too big to fit in memory");
@@ -1347,6 +1495,9 @@ void bin_load (const std::string& filename, const size_t offset)
     LOG_ERROR("Empty bin file");
     return;
   }
+  CRASH_CHECKPOINT("bin_load: before z80 stack setup");
+  fprintf(stderr, "bin_load: loaded %zu bytes, jumping PC to 0x%zx\n", read, offset);
+  fflush(stderr);
   // Jump at the beginning of the program
   z80.PC.w.l = offset;
   // Setup the stack the way it would be if we had launch it with run"
@@ -1816,7 +1967,23 @@ void loadConfiguration (t_CPC &CPC, const std::string& configFilename)
    std::string appPath = chAppPath;
 
    CPC.model = conf.getIntValue("system", "model", 2); // CPC 6128
-   if (CPC.model > 3) {
+   if (CPC.model > 3 || CPC.model < 0) {
+      // Only the upper bound was checked before. A negative value here
+      // (a corrupt/hand-edited cap32.cfg, or any config source that
+      // can't be trusted to only ever produce 0..3) survives the
+      // `CPC.model <= 2` check in emulator_patch_ROM() unchanged - that
+      // comparison is true for any negative number too - and then
+      // indexes chROMFile[CPC.model] with a negative subscript: reading
+      // out-of-bounds memory *before* the array as if it were a valid
+      // ROM filename string. Whatever garbage bytes happen to sit
+      // there get treated as a path; fopen() usually just fails on it,
+      // but the read past the array bound, and the following
+      // fopen()-with-garbage-path outcome, are both undefined behaviour
+      // - in the specific case that produced this crash, it seeded
+      // pbROM with never-initialized memory downstream instead of
+      // failing cleanly, which the Z80 later decoded as an opcode
+      // stream and eventually jumped through as if it were code,
+      // ending in a SIGBUS on an unrelated unaligned address.
       CPC.model = 2;
    }
    CPC.jumpers = conf.getIntValue("system", "jumpers", 0x1e) & 0x1e; // OEM is Amstrad, video refresh is 50Hz
@@ -1842,8 +2009,20 @@ void loadConfiguration (t_CPC &CPC, const std::string& configFilename)
    }
    CPC.joystick_emulation = static_cast<JoystickEmulation>(conf.getIntValue("system", "joystick_emulation", 0));
    CPC.joysticks = conf.getIntValue("system", "joysticks", 1) & 1;
-   CPC.joystick_menu_button = conf.getIntValue("system", "joystick_menu_button", 9) - 1;
-   CPC.joystick_vkeyboard_button = conf.getIntValue("system", "joystick_vkeyboard_button", 10) - 1;
+   // Both fields are unsigned int (cap32.h). getIntValue()-1 on a config
+   // value of 0 (a hand-edited/corrupt cap32.cfg, or any future caller
+   // that writes 0 here) underflows to 4294967295 instead of a sane
+   // "disabled" sentinel - same class of unchecked-config-value bug as
+   // CPC.model and CPC.scr_style above, just without their explicit
+   // clamp. Currently harmless (event.jbutton.button, an SDL Uint8,
+   // simply never equals it - see the comparisons below), but any
+   // future code that uses this as an array index would read
+   // out-of-bounds. Clamp defensively so the field only ever holds a
+   // real button index or 0.
+   int menuButtonCfg = conf.getIntValue("system", "joystick_menu_button", 9);
+   CPC.joystick_menu_button = (menuButtonCfg > 0) ? static_cast<unsigned int>(menuButtonCfg - 1) : 0;
+   int vkeyButtonCfg = conf.getIntValue("system", "joystick_vkeyboard_button", 10);
+   CPC.joystick_vkeyboard_button = (vkeyButtonCfg > 0) ? static_cast<unsigned int>(vkeyButtonCfg - 1) : 0;
    CPC.resources_path = conf.getStringValue("system", "resources_path", appPath + "/resources");
 
    CPC.devtools_scale = conf.getIntValue("devtools", "scale", 1);
@@ -2148,13 +2327,17 @@ void showGui()
 // TODO: Support watchpoints too
 void loadBreakpoints()
 {
+  CRASH_CHECKPOINT("loadBreakpoints: entered");
   if (args.symFilePath.empty()) return;
+  fprintf(stderr, "loadBreakpoints: parsing sym file '%s'\n", args.symFilePath.c_str());
+  fflush(stderr);
   Symfile symfile(args.symFilePath);
   for (auto breakpoint : symfile.Breakpoints()) {
     if (std::find_if(breakpoints.begin(), breakpoints.end(),
           [&](const auto& bp) { return bp.address == breakpoint; } ) != breakpoints.end()) continue;
     breakpoints.emplace_back(breakpoint);
   }
+  CRASH_CHECKPOINT("loadBreakpoints: done");
 }
 
 bool showDevTools()
@@ -2183,6 +2366,7 @@ bool showDevTools()
 }
 
 void dumpScreen() {
+   CRASH_CHECKPOINT("dumpScreen: entered");
    std::string dir = CPC.sdump_dir;
    if (!is_directory(dir)) {
           LOG_ERROR("Unable to find or open directory " + CPC.sdump_dir + " when trying to take a screenshot. Defaulting to current directory.")
@@ -2191,6 +2375,7 @@ void dumpScreen() {
    std::string dumpFile = "screenshot_" + getDateString() + ".png";
    std::string dumpPath = dir + "/" + dumpFile;
    LOG_INFO("Dumping screen to " + dumpPath);
+   CRASH_CHECKPOINT("dumpScreen: before SDL_SavePNG");
    if (SDL_SavePNG(back_surface, dumpPath)) {
      LOG_ERROR("Could not write screenshot file to " + dumpPath);
    }
@@ -2201,6 +2386,7 @@ void dumpScreen() {
 
 // Very similar to screenshot, but difficult to factorize :-)
 void dumpSnapshot() {
+   CRASH_CHECKPOINT("dumpSnapshot: entered");
    std::string dir = CPC.snap_path;
    if (!is_directory(dir)) {
           LOG_ERROR("Unable to find or open directory " + CPC.snap_path + " when trying to take a machine snapshot. Defaulting to current directory.")
@@ -2209,6 +2395,7 @@ void dumpSnapshot() {
    std::string dumpFile = "snapshot_" + getDateString() + ".sna";
    std::string dumpPath = dir + "/" + dumpFile;
    LOG_INFO("Dumping machine snapshot to " + dumpPath);
+   CRASH_CHECKPOINT("dumpSnapshot: before snapshot_save");
    if (snapshot_save(dumpPath)) {
      LOG_ERROR("Could not write machine snapshot to " + dumpPath);
    }
@@ -2221,6 +2408,9 @@ void dumpSnapshot() {
 void loadSnapshot() {
    if (lastSavedSnapshot.empty()) return;
    LOG_INFO("Loading snapshot from " + lastSavedSnapshot);
+   CRASH_CHECKPOINT("loadSnapshot: before snapshot_load");
+   fprintf(stderr, "loadSnapshot: loading '%s'\n", lastSavedSnapshot.c_str());
+   fflush(stderr);
    if (snapshot_load(lastSavedSnapshot)) {
      LOG_ERROR("Could not load machine snapshot from " + lastSavedSnapshot);
    }
@@ -2229,6 +2419,7 @@ void loadSnapshot() {
      stringutils::splitPath(lastSavedSnapshot, dirname, filename);
      set_osd_message("Restored " + filename);
    }
+   CRASH_CHECKPOINT("loadSnapshot: done");
 }
 
 bool driveAltered() {
@@ -2237,15 +2428,23 @@ bool driveAltered() {
 
 void doCleanUp ()
 {
+   CRASH_CHECKPOINT("doCleanUp: before printer_stop");
    printer_stop();
+   CRASH_CHECKPOINT("doCleanUp: before emulator_shutdown");
    emulator_shutdown();
 
+   CRASH_CHECKPOINT("doCleanUp: before dsk_eject driveA");
    dsk_eject(&driveA);
+   CRASH_CHECKPOINT("doCleanUp: before dsk_eject driveB");
    dsk_eject(&driveB);
+   CRASH_CHECKPOINT("doCleanUp: before tape_eject");
    tape_eject();
 
+   CRASH_CHECKPOINT("doCleanUp: before joysticks_shutdown");
    joysticks_shutdown();
+   CRASH_CHECKPOINT("doCleanUp: before audio_shutdown");
    audio_shutdown();
+   CRASH_CHECKPOINT("doCleanUp: before video_shutdown");
    video_shutdown();
 
    #ifdef DEBUG
@@ -2254,11 +2453,16 @@ void doCleanUp ()
    }
    #endif
 
+   CRASH_CHECKPOINT("doCleanUp: before SDL_Quit");
    SDL_Quit();
+   CRASH_CHECKPOINT("doCleanUp: done");
 }
 
 void cleanExit(int returnCode, bool askIfUnsaved)
 {
+   fprintf(stderr, "cleanExit: returnCode=%d askIfUnsaved=%d\n", returnCode, askIfUnsaved);
+   fflush(stderr);
+   CRASH_CHECKPOINT("cleanExit: entered");
    if (askIfUnsaved && driveAltered() && !userConfirmsQuitWithoutSaving()) {
      return;
    }
@@ -2845,6 +3049,13 @@ int cap32_main (int argc, char **argv)
    CRASH_CHECKPOINT("before loadConfiguration");
    loadConfiguration(CPC, getConfigurationFilename()); // retrieve the emulator configuration
    CRASH_CHECKPOINT("after loadConfiguration, before printer_start");
+   // Log the config values most responsible for past silent crashes
+   // (bad model index, bad rom_path, out-of-range scr_style) so a fresh
+   // caprice32.log always shows the actual resolved state a crash
+   // happened in, not just "loadConfiguration ran".
+   fprintf(stderr, "Config: model=%u ram_size=%u scr_style=%u rom_path=%s\n",
+           CPC.model, CPC.ram_size, CPC.scr_style, CPC.rom_path.c_str());
+   fflush(stderr);
    if (CPC.printer) {
       if (!printer_start()) { // start capturing printer output, if enabled
          CPC.printer = 0;

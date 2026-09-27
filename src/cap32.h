@@ -417,6 +417,16 @@ typedef struct t_PSG_tag {
    unsigned int buffer_full;
    unsigned char control;
    unsigned char reg_select;
+   // NOTE: this used to also have a `struct { unsigned short TonA; ... }
+   // ATTR_PACKED;` member overlaid on the same bytes as Index[]. `packed`
+   // only removes compiler-inserted padding - it does not relax the CPU's
+   // alignment requirement for the access instruction the compiler
+   // generates. Because that struct shared storage with Index[16], its
+   // unsigned short members (TonB, TonC, Envelope) landed on odd byte
+   // offsets (1, 5, 9), and a 16-bit load there faults with SIGBUS
+   // (EXC_ARM_DA_ALIGN) on ARM. It has been removed; callers that need the
+   // 16-bit register pairs (TonA/TonB/TonC/Envelope) now combine the Lo/Hi
+   // byte fields themselves (see psg.cpp), which is alignment-safe.
    union {
       unsigned char Index[16];
       struct {
@@ -431,14 +441,6 @@ typedef struct t_PSG_tag {
          unsigned char PortA;
          unsigned char PortB;
       };
-      struct {
-         unsigned short TonA;
-         unsigned short TonB;
-         unsigned short TonC;
-         unsigned char _noise, _mixer, _ampa, _ampb, _ampc;
-         unsigned short Envelope;
-         unsigned char _envtype, _porta, portb;
-      } ATTR_PACKED;
    } RegisterAY;
    int AmplitudeEnv;
    bool FirstPeriod;

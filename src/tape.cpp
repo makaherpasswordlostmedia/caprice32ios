@@ -51,9 +51,16 @@ byte bTapeLevel;
 byte bTapeData;
 byte *pbTapeBlock;
 byte *pbTapeBlockData;
-word *pwTapePulseTable;
-word *pwTapePulseTableEnd;
-word *pwTapePulseTablePtr;
+// These used to be `word *`, walked with `*ptr++` over raw tape-file bytes
+// (see cases 0x13/0x19 below). The starting address comes straight from
+// pbTapeBlock + a fixed offset into a TZX/CDT block, which is not
+// guaranteed to be 2-byte aligned - reading through a word* there is a
+// strict-alignment halfword load on ARM and SIGBUSes whenever the offset
+// is odd. Kept as byte* + explicit load_le16()/2-byte stride instead,
+// which works at any address.
+byte *pbTapePulseTable;
+byte *pbTapePulseTableEnd;
+byte *pbTapePulseTablePtr;
 word wCycleTable[2];
 int iTapeCycleCount;
 dword dwTapePulseCycles;
@@ -68,9 +75,10 @@ dword dwTapeBitsToShift;
 
 void Tape_GetCycleCount()
 {
-   dwTapePulseCycles = CYCLE_ADJUST(*pwTapePulseTablePtr++);
-   if (pwTapePulseTablePtr >= pwTapePulseTableEnd) {
-      pwTapePulseTablePtr = pwTapePulseTable;
+   dwTapePulseCycles = CYCLE_ADJUST(load_le16(pbTapePulseTablePtr));
+   pbTapePulseTablePtr += sizeof(word);
+   if (pbTapePulseTablePtr >= pbTapePulseTableEnd) {
+      pbTapePulseTablePtr = pbTapePulseTable;
    }
 }
 
@@ -173,9 +181,9 @@ int Tape_GetNextBlock()
             #ifdef DEBUG_TAPE
             fputs("--- PILOT\r\n", pfoDebug);
             #endif
-            dwTapePulseCycles = CYCLE_ADJUST(*reinterpret_cast<word *>(pbTapeBlock+0x01));
+            dwTapePulseCycles = CYCLE_ADJUST(load_le16(pbTapeBlock+0x01));
             iTapeCycleCount += static_cast<int>(dwTapePulseCycles); // set cycle count for current level
-            dwTapePulseCount = *reinterpret_cast<word *>(pbTapeBlock+0x01+0x0a);
+            dwTapePulseCount = load_le16(pbTapeBlock+0x01+0x0a);
             #ifdef DEBUG_TAPE
             fprintf(pfoDebug, "%c %d\r\n",(bTapeLevel == TAPE_LEVEL_HIGH ? 'H':'L'), iTapeCycleCount);
             #endif
@@ -186,9 +194,9 @@ int Tape_GetNextBlock()
             #ifdef DEBUG_TAPE
             fputs("--- TONE\r\n", pfoDebug);
             #endif
-            dwTapePulseCycles = CYCLE_ADJUST(*reinterpret_cast<word *>(pbTapeBlock+0x01));
+            dwTapePulseCycles = CYCLE_ADJUST(load_le16(pbTapeBlock+0x01));
             iTapeCycleCount += static_cast<int>(dwTapePulseCycles); // set cycle count for current level
-            dwTapePulseCount = *reinterpret_cast<word *>(pbTapeBlock+0x01+0x02);
+            dwTapePulseCount = load_le16(pbTapeBlock+0x01+0x02);
             #ifdef DEBUG_TAPE
             fprintf(pfoDebug, "%c %d\r\n",(bTapeLevel == TAPE_LEVEL_HIGH ? 'H':'L'), iTapeCycleCount);
             #endif
@@ -200,9 +208,9 @@ int Tape_GetNextBlock()
             fputs("--- PULSE SEQ\r\n", pfoDebug);
             #endif
             dwTapePulseCount = *(pbTapeBlock+0x01);
-            pwTapePulseTable =
-            pwTapePulseTablePtr = reinterpret_cast<word *>(pbTapeBlock+0x01+0x01);
-            pwTapePulseTableEnd = pwTapePulseTable + dwTapePulseCount;
+            pbTapePulseTable =
+            pbTapePulseTablePtr = pbTapeBlock+0x01+0x01;
+            pbTapePulseTableEnd = pbTapePulseTable + dwTapePulseCount * sizeof(word);
             Tape_GetCycleCount();
             iTapeCycleCount += static_cast<int>(dwTapePulseCycles); // set cycle count for current level
             #ifdef DEBUG_TAPE
@@ -215,9 +223,9 @@ int Tape_GetNextBlock()
             #ifdef DEBUG_TAPE
             fputs("--- DATA\r\n", pfoDebug);
             #endif
-            dwTapeZeroPulseCycles = CYCLE_ADJUST(*reinterpret_cast<word *>(pbTapeBlock+0x01)); // pulse length for a zero bit
-            dwTapeOnePulseCycles = CYCLE_ADJUST(*reinterpret_cast<word *>(pbTapeBlock+0x01+0x02)); // pulse length for a one bit
-            dwTapeDataCount = ((*reinterpret_cast<dword *>(pbTapeBlock+0x01+0x07) & 0x00ffffff) - 1) << 3; // (byte count - 1) * 8 bits
+            dwTapeZeroPulseCycles = CYCLE_ADJUST(load_le16(pbTapeBlock+0x01)); // pulse length for a zero bit
+            dwTapeOnePulseCycles = CYCLE_ADJUST(load_le16(pbTapeBlock+0x01+0x02)); // pulse length for a one bit
+            dwTapeDataCount = ((load_le32(pbTapeBlock+0x01+0x07) & 0x00ffffff) - 1) << 3; // (byte count - 1) * 8 bits
             dwTapeDataCount += *(pbTapeBlock+0x01+0x04); // add the number of bits in the last data byte
             pbTapeBlockData = pbTapeBlock+0x01+0x0a; // pointer to the tape data
             dwTapeBitsToShift = 0;
@@ -233,8 +241,8 @@ int Tape_GetNextBlock()
             #ifdef DEBUG_TAPE
             fputs("--- SAMPLE DATA\r\n", pfoDebug);
             #endif
-            dwTapePulseCycles = CYCLE_ADJUST(*reinterpret_cast<word *>(pbTapeBlock+0x01)); // number of T states per sample
-            dwTapeDataCount = ((*reinterpret_cast<dword *>(pbTapeBlock+0x01+0x05) & 0x00ffffff) - 1) << 3; // (byte count - 1) * 8 bits
+            dwTapePulseCycles = CYCLE_ADJUST(load_le16(pbTapeBlock+0x01)); // number of T states per sample
+            dwTapeDataCount = ((load_le32(pbTapeBlock+0x01+0x05) & 0x00ffffff) - 1) << 3; // (byte count - 1) * 8 bits
             dwTapeDataCount += *(pbTapeBlock+0x01+0x04); // add the number of bits in the last data byte
             pbTapeBlockData = pbTapeBlock+0x01+0x08; // pointer to the tape data
             dwTapeBitsToShift = 0;
@@ -242,14 +250,14 @@ int Tape_GetNextBlock()
             return 1;
 
          case 0x20: // pause
-            if (*reinterpret_cast<word *>(pbTapeBlock+0x01)) { // was a pause requested?
+            if (load_le16(pbTapeBlock+0x01)) { // was a pause requested?
                dwTapeStage = TAPE_PAUSE_STAGE;
                #ifdef DEBUG_TAPE
                fputs("--- PAUSE\r\n", pfoDebug);
                #endif
                dwTapePulseCycles = MS_TO_CYCLES(1); // start with a 1ms level opposite to the one last played
                iTapeCycleCount += static_cast<int>(dwTapePulseCycles); // set cycle count for current level
-               dwTapePulseCycles = MS_TO_CYCLES(*reinterpret_cast<word *>(pbTapeBlock+0x01) - 1); // get the actual pause length
+               dwTapePulseCycles = MS_TO_CYCLES(load_le16(pbTapeBlock+0x01) - 1); // get the actual pause length
                dwTapePulseCount = 2; // just one pulse
                #ifdef DEBUG_TAPE
                fprintf(pfoDebug, "%c %d\r\n",(bTapeLevel == TAPE_LEVEL_HIGH ? 'H':'L'), iTapeCycleCount);
@@ -278,7 +286,7 @@ int Tape_GetNextBlock()
             break;
 
          case 0x32: // archive info
-            pbTapeBlock += *reinterpret_cast<word *>(pbTapeBlock+0x01) + 2 + 1; // nothing to do, skip the block
+            pbTapeBlock += load_le16(pbTapeBlock+0x01) + 2 + 1; // nothing to do, skip the block
             break;
 
          case 0x33: // hardware type
@@ -290,11 +298,11 @@ int Tape_GetNextBlock()
             break;
 
          case 0x35: // custom info block
-            pbTapeBlock += *reinterpret_cast<dword *>(pbTapeBlock+0x01+0x10) + 0x14 + 1; // nothing to do, skip the block
+            pbTapeBlock += load_le32(pbTapeBlock+0x01+0x10) + 0x14 + 1; // nothing to do, skip the block
             break;
 
          case 0x40: // snapshot block
-            pbTapeBlock += (*reinterpret_cast<dword *>(pbTapeBlock+0x01+0x01) & 0x00ffffff) + 0x04 + 1; // nothing to do, skip the block
+            pbTapeBlock += (load_le32(pbTapeBlock+0x01+0x01) & 0x00ffffff) + 0x04 + 1; // nothing to do, skip the block
             break;
 
          case 0x5A: // another tzx/cdt file
@@ -302,7 +310,7 @@ int Tape_GetNextBlock()
             break;
 
          default: // "extension rule"
-            pbTapeBlock += *reinterpret_cast<dword *>(pbTapeBlock+0x01) + 4 + 1; // nothing to do, skip the block
+            pbTapeBlock += load_le32(pbTapeBlock+0x01) + 4 + 1; // nothing to do, skip the block
       }
    }
 
@@ -317,11 +325,11 @@ void Tape_BlockDone()
       switch (*pbTapeBlock) {
 
          case 0x10: // standard speed data block
-            pbTapeBlock += *reinterpret_cast<word *>(pbTapeBlock+0x01+0x02) + 0x04 + 1;
+            pbTapeBlock += load_le16(pbTapeBlock+0x01+0x02) + 0x04 + 1;
             break;
 
          case 0x11: // turbo loading data block
-            pbTapeBlock += (*reinterpret_cast<dword *>(pbTapeBlock+0x01+0x0f) & 0x00ffffff) + 0x12 + 1;
+            pbTapeBlock += (load_le32(pbTapeBlock+0x01+0x0f) & 0x00ffffff) + 0x12 + 1;
             break;
 
          case 0x12: // pure tone
@@ -333,11 +341,11 @@ void Tape_BlockDone()
             break;
 
          case 0x14: // pure data block
-            pbTapeBlock += (*reinterpret_cast<dword *>(pbTapeBlock+0x01+0x07) & 0x00ffffff) + 0x0a + 1;
+            pbTapeBlock += (load_le32(pbTapeBlock+0x01+0x07) & 0x00ffffff) + 0x0a + 1;
             break;
 
          case 0x15: // direct recording
-            pbTapeBlock += (*reinterpret_cast<dword *>(pbTapeBlock+0x01+0x05) & 0x00ffffff) + 0x08 + 1;
+            pbTapeBlock += (load_le32(pbTapeBlock+0x01+0x05) & 0x00ffffff) + 0x08 + 1;
             break;
 
          case 0x20: // pause
@@ -377,9 +385,9 @@ void Tape_UpdateLevel()
                   #endif
                   wCycleTable[0] = 667;
                   wCycleTable[1] = 735;
-                  pwTapePulseTable =
-                  pwTapePulseTablePtr = &wCycleTable[0];
-                  pwTapePulseTableEnd = &wCycleTable[2];
+                  pbTapePulseTable =
+                  pbTapePulseTablePtr = reinterpret_cast<byte *>(&wCycleTable[0]);
+                  pbTapePulseTableEnd = reinterpret_cast<byte *>(&wCycleTable[2]);
                   Tape_GetCycleCount();
                   iTapeCycleCount += static_cast<int>(dwTapePulseCycles); // set cycle count for current level
                   #ifdef DEBUG_TAPE
@@ -393,9 +401,9 @@ void Tape_UpdateLevel()
                   #ifdef DEBUG_TAPE
                   fputs("--- SYNC\r\n", pfoDebug);
                   #endif
-                  pwTapePulseTable =
-                  pwTapePulseTablePtr = reinterpret_cast<word *>(pbTapeBlock+0x01+0x02);
-                  pwTapePulseTableEnd = reinterpret_cast<word *>(pbTapeBlock+0x01+0x06);
+                  pbTapePulseTable =
+                  pbTapePulseTablePtr = pbTapeBlock+0x01+0x02;
+                  pbTapePulseTableEnd = pbTapeBlock+0x01+0x06;
                   Tape_GetCycleCount();
                   iTapeCycleCount += static_cast<int>(dwTapePulseCycles); // set cycle count for current level
                   #ifdef DEBUG_TAPE
@@ -431,7 +439,7 @@ void Tape_UpdateLevel()
                   #endif
                   dwTapeZeroPulseCycles = CYCLE_ADJUST(855); // pulse length for a zero bit
                   dwTapeOnePulseCycles = CYCLE_ADJUST(1710); // pulse length for a one bit
-                  dwTapeDataCount = *reinterpret_cast<word *>(pbTapeBlock+0x01+0x02) << 3; // byte count * 8 bits;
+                  dwTapeDataCount = load_le16(pbTapeBlock+0x01+0x02) << 3; // byte count * 8 bits;
                   pbTapeBlockData = pbTapeBlock+0x01+0x04; // pointer to the tape data
                   dwTapeBitsToShift = 0;
                   Tape_ReadDataBit();
@@ -446,9 +454,9 @@ void Tape_UpdateLevel()
                   #ifdef DEBUG_TAPE
                   fputs("--- DATA\r\n", pfoDebug);
                   #endif
-                  dwTapeZeroPulseCycles = CYCLE_ADJUST(*reinterpret_cast<word *>(pbTapeBlock+0x01+0x06)); // pulse length for a zero bit
-                  dwTapeOnePulseCycles = CYCLE_ADJUST(*reinterpret_cast<word *>(pbTapeBlock+0x01+0x08)); // pulse length for a one bit
-                  dwTapeDataCount = ((*reinterpret_cast<dword *>(pbTapeBlock+0x01+0x0f) & 0x00ffffff) - 1) << 3; // (byte count - 1) * 8 bits;
+                  dwTapeZeroPulseCycles = CYCLE_ADJUST(load_le16(pbTapeBlock+0x01+0x06)); // pulse length for a zero bit
+                  dwTapeOnePulseCycles = CYCLE_ADJUST(load_le16(pbTapeBlock+0x01+0x08)); // pulse length for a one bit
+                  dwTapeDataCount = ((load_le32(pbTapeBlock+0x01+0x0f) & 0x00ffffff) - 1) << 3; // (byte count - 1) * 8 bits;
                   dwTapeDataCount += *(pbTapeBlock+0x01+0x0c); // add the number of bits in the last data byte
                   pbTapeBlockData = pbTapeBlock+0x01+0x12; // pointer to the tape data
                   dwTapeBitsToShift = 0;
@@ -486,7 +494,7 @@ void Tape_UpdateLevel()
                switch (*pbTapeBlock) {
 
                   case 0x10: // standard speed data block
-                     if (*reinterpret_cast<word *>(pbTapeBlock+0x01)) { // was a pause requested?
+                     if (load_le16(pbTapeBlock+0x01)) { // was a pause requested?
                         dwTapeStage = TAPE_PAUSE_STAGE;
                         #ifdef DEBUG_TAPE
                         fputs("--- PAUSE\r\n", pfoDebug);
@@ -496,7 +504,7 @@ void Tape_UpdateLevel()
                         #ifdef DEBUG_TAPE
                         fprintf(pfoDebug, "%c %d\r\n",(bTapeLevel == TAPE_LEVEL_HIGH ? 'H':'L'), iTapeCycleCount);
                         #endif
-                        dwTapePulseCycles = MS_TO_CYCLES(*reinterpret_cast<word *>(pbTapeBlock+0x01) - 1); // pause in ms
+                        dwTapePulseCycles = MS_TO_CYCLES(load_le16(pbTapeBlock+0x01) - 1); // pause in ms
                         dwTapePulseCount = 2; // just one pulse
                      }
                      else {
@@ -505,7 +513,7 @@ void Tape_UpdateLevel()
                      break;
 
                   case 0x11: // turbo loading data block
-                     if (*reinterpret_cast<word *>(pbTapeBlock+0x01+0x0d)) { // was a pause requested?
+                     if (load_le16(pbTapeBlock+0x01+0x0d)) { // was a pause requested?
                         dwTapeStage = TAPE_PAUSE_STAGE;
                         #ifdef DEBUG_TAPE
                         fputs("--- PAUSE\r\n", pfoDebug);
@@ -515,7 +523,7 @@ void Tape_UpdateLevel()
                         #ifdef DEBUG_TAPE
                         fprintf(pfoDebug, "%c %d\r\n",(bTapeLevel == TAPE_LEVEL_HIGH ? 'H':'L'), iTapeCycleCount);
                         #endif
-                        dwTapePulseCycles = MS_TO_CYCLES(*reinterpret_cast<word *>(pbTapeBlock+0x01+0x0d) - 1); // pause in ms
+                        dwTapePulseCycles = MS_TO_CYCLES(load_le16(pbTapeBlock+0x01+0x0d) - 1); // pause in ms
                         dwTapePulseCount = 2; // just one pulse
                      }
                      else {
@@ -524,7 +532,7 @@ void Tape_UpdateLevel()
                      break;
 
                   case 0x14: // pure data block
-                     if (*reinterpret_cast<word *>(pbTapeBlock+0x01+0x05)) { // was a pause requested?
+                     if (load_le16(pbTapeBlock+0x01+0x05)) { // was a pause requested?
                         dwTapeStage = TAPE_PAUSE_STAGE;
                         #ifdef DEBUG_TAPE
                         fputs("--- PAUSE\r\n", pfoDebug);
@@ -534,7 +542,7 @@ void Tape_UpdateLevel()
                         #ifdef DEBUG_TAPE
                         fprintf(pfoDebug, "%c %d\r\n",(bTapeLevel == TAPE_LEVEL_HIGH ? 'H':'L'), iTapeCycleCount);
                         #endif
-                        dwTapePulseCycles = MS_TO_CYCLES(*reinterpret_cast<word *>(pbTapeBlock+0x01+0x05) - 1); // pause in ms
+                        dwTapePulseCycles = MS_TO_CYCLES(load_le16(pbTapeBlock+0x01+0x05) - 1); // pause in ms
                         dwTapePulseCount = 2; // just one pulse
                      }
                      else {
@@ -551,7 +559,7 @@ void Tape_UpdateLevel()
 
       case TAPE_SAMPLE_DATA_STAGE:
          if (!Tape_ReadSampleDataBit()) {
-            if (*reinterpret_cast<word *>(pbTapeBlock+0x01+0x02)) { // was a pause requested?
+            if (load_le16(pbTapeBlock+0x01+0x02)) { // was a pause requested?
                dwTapeStage = TAPE_PAUSE_STAGE;
                #ifdef DEBUG_TAPE
                fputs("--- PAUSE\r\n", pfoDebug);
@@ -561,7 +569,7 @@ void Tape_UpdateLevel()
                #ifdef DEBUG_TAPE
                fprintf(pfoDebug, "%c %d\r\n",(bTapeLevel == TAPE_LEVEL_HIGH ? 'H':'L'), iTapeCycleCount);
                #endif
-               dwTapePulseCycles = MS_TO_CYCLES(*reinterpret_cast<word *>(pbTapeBlock+0x01+0x02) - 1); // pause in ms
+               dwTapePulseCycles = MS_TO_CYCLES(load_le16(pbTapeBlock+0x01+0x02) - 1); // pause in ms
                dwTapePulseCount = 2; // just one pulse
             }
             else {
