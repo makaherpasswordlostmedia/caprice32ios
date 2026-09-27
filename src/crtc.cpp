@@ -27,6 +27,18 @@
 #include "z80.h"
 #include "log.h"
 #include "asic.h"
+#include <cstring>
+
+// RendPos/RendStart point into RendBuff (a plain byte[800]) at an offset
+// that is not always a multiple of 4 (see the PosShift-derived offset in
+// set_prerender() below), even though both are declared dword*. On this
+// armv7/iOS toolchain a direct *dword_ptr = value store to a misaligned
+// address compiles to a strict-alignment instruction and SIGBUS's
+// (EXC_ARM_DA_ALIGN). memcpy has no alignment requirement, so route every
+// dword store through this tiny helper instead of *ptr++ = value.
+static inline void store_dword(dword *dst, dword val) {
+   memcpy(dst, &val, sizeof(val));
+}
 
 extern t_CPC CPC;
 extern t_CRTC CRTC;
@@ -790,10 +802,10 @@ void prerender_border()
    dword dwVal = 0x10101010;
    // Global variable privatization
    dword *pos = RendPos;
-   *pos++ = dwVal;
-   *pos++ = dwVal;
-   *pos++ = dwVal;
-   *pos++ = dwVal;
+   store_dword(pos++, dwVal);
+   store_dword(pos++, dwVal);
+   store_dword(pos++, dwVal);
+   store_dword(pos++, dwVal);
    RendPos = pos;
 }
 
@@ -804,8 +816,8 @@ void prerender_border_half()
    dword dwVal = 0x10101010;
    // Global variable privatization
    dword *pos = RendPos;
-   *pos++ = dwVal;
-   *pos++ = dwVal;
+   store_dword(pos++, dwVal);
+   store_dword(pos++, dwVal);
    RendPos = pos;
 }
 
@@ -816,10 +828,10 @@ void prerender_sync()
    dword dwVal = 0x11111111;
    // Global variable privatization
    dword *pos = RendPos;
-   *pos++ = dwVal;
-   *pos++ = dwVal;
-   *pos++ = dwVal;
-   *pos++ = dwVal;
+   store_dword(pos++, dwVal);
+   store_dword(pos++, dwVal);
+   store_dword(pos++, dwVal);
+   store_dword(pos++, dwVal);
    RendPos = pos;
 }
 
@@ -830,8 +842,8 @@ void prerender_sync_half()
    dword dwVal = 0x11111111;
    // Global variable privatization
    dword *pos = RendPos;
-   *pos++ = dwVal;
-   *pos++ = dwVal;
+   store_dword(pos++, dwVal);
+   store_dword(pos++, dwVal);
    RendPos = pos;
 }
 
@@ -869,12 +881,12 @@ void prerender_normal()
    const dword *map = ModeMap;
 
    byte bVidMem = *ram++;
-   *pos++ = map[bVidMem * 2];
-   *pos++ = map[bVidMem * 2 + 1];
+   store_dword(pos++, map[bVidMem * 2]);
+   store_dword(pos++, map[bVidMem * 2 + 1]);
 
    bVidMem = *ram;
-   *pos++ = map[bVidMem * 2];
-   *pos++ = map[bVidMem * 2 + 1];
+   store_dword(pos++, map[bVidMem * 2]);
+   store_dword(pos++, map[bVidMem * 2 + 1]);
 
    RendPos = pos;
 }
@@ -899,16 +911,16 @@ void prerender_normal_plus()
    val2 = *(ModeMap + (bVidMem1 * 2) + 1);
    val3 = *(ModeMap + (bVidMem2 * 2));
    val4 = *(ModeMap + (bVidMem2 * 2) + 1);
-   *RendPos = shiftLittleEndianDwordTriplet(val1, val2, val3, byteShift);
-   *(RendPos + 1) = shiftLittleEndianDwordTriplet(val2, val3, val4, byteShift);
+   store_dword(RendPos, shiftLittleEndianDwordTriplet(val1, val2, val3, byteShift));
+   store_dword(RendPos + 1, shiftLittleEndianDwordTriplet(val2, val3, val4, byteShift));
 
    bVidMem1 = getRAMByte(next_address - byteOffset + 1);
    val1 = *(ModeMap + (bVidMem2 * 2));
    val2 = *(ModeMap + (bVidMem2 * 2) + 1);
    val3 = *(ModeMap + (bVidMem1 * 2));
    val4 = *(ModeMap + (bVidMem1 * 2) + 1);
-   *(RendPos + 2) = shiftLittleEndianDwordTriplet(val1, val2, val3, byteShift);
-   *(RendPos + 3) = shiftLittleEndianDwordTriplet(val2, val3, val4, byteShift);
+   store_dword(RendPos + 2, shiftLittleEndianDwordTriplet(val1, val2, val3, byteShift));
+   store_dword(RendPos + 3, shiftLittleEndianDwordTriplet(val2, val3, val4, byteShift));
 
    RendPos += 4;
 }
@@ -925,9 +937,9 @@ void prerender_normal_half()
    const dword *map = ModeMap;
 
    byte bVidMem = *ram++;
-   *pos++ = map[bVidMem];
+   store_dword(pos++, map[bVidMem]);
    bVidMem = *ram;
-   *pos++ = map[bVidMem];
+   store_dword(pos++, map[bVidMem]);
 
    RendPos = pos;
 }
@@ -950,12 +962,12 @@ void prerender_normal_half_plus()
    dword val1, val2;
    val1 = *(ModeMap + bVidMem1);
    val2 = *(ModeMap + bVidMem2);
-   *RendPos = shiftLittleEndianDwordTriplet(0, val1, val2, byteShift);
+   store_dword(RendPos, shiftLittleEndianDwordTriplet(0, val1, val2, byteShift));
 
    bVidMem1 = getRAMByte(next_address - byteOffset + 1);
    val1 = *(ModeMap + bVidMem2);
    val2 = *(ModeMap + bVidMem1);
-   *(RendPos + 1) = shiftLittleEndianDwordTriplet(0, val1, val2, byteShift);
+   store_dword(RendPos + 1, shiftLittleEndianDwordTriplet(0, val1, val2, byteShift));
 
    RendPos += 2;
 }
@@ -1017,15 +1029,23 @@ void render8bpp_doubleY()
 void render16bpp()
 {
    byte bCount = *RendWid++;
-   word *dst = reinterpret_cast<word*>(CPC.scr_pos);
+   // See the comment in render24bpp() below: CPC.scr_pos can land on an
+   // odd byte address depending on the SDL_Renderer's surface format/
+   // pitch, and a direct reinterpret_cast<word*> store here compiles to
+   // a strict-alignment halfword access on this armv7/iOS toolchain,
+   // which SIGBUS's (EXC_ARM_DA_ALIGN) the instant that happens. memcpy
+   // never requires alignment, so use that instead of a typed store.
+   byte *dst = CPC.scr_pos;
    // Global variable privatization
    const byte *src = RendOut;
    const dword *pal = GateArray.palette;
    while (bCount--) {
-      *dst++ = static_cast<word>(pal[*src++]);
+      word val = static_cast<word>(pal[*src++]);
+      memcpy(dst, &val, sizeof(val));
+      dst += sizeof(val);
    }
    RendOut = const_cast<byte*>(src);
-   CPC.scr_pos = reinterpret_cast<byte*>(dst);
+   CPC.scr_pos = dst;
 }
 
 
@@ -1033,18 +1053,21 @@ void render16bpp()
 void render16bpp_doubleY()
 {
    byte bCount = *RendWid++;
-   word *dst1 = reinterpret_cast<word*>(CPC.scr_pos);
-   word *dst2 = reinterpret_cast<word*>(CPC.scr_pos + CPC.scr_bps);
+   // See render16bpp() above and the comment in render24bpp() below.
+   byte *dst1 = CPC.scr_pos;
+   byte *dst2 = CPC.scr_pos + CPC.scr_bps;
    // Global variable privatization
    const byte *src = RendOut;
    const dword *pal = GateArray.palette;
    while (bCount--) {
       word val = static_cast<word>(pal[*src++]);
-      *dst1++ = val;
-      *dst2++ = val;
+      memcpy(dst1, &val, sizeof(val));
+      memcpy(dst2, &val, sizeof(val));
+      dst1 += sizeof(val);
+      dst2 += sizeof(val);
    }
    RendOut = const_cast<byte*>(src);
-   CPC.scr_pos = reinterpret_cast<byte*>(dst1);
+   CPC.scr_pos = dst1;
 }
 
 
@@ -1112,15 +1135,19 @@ void render24bpp_doubleY()
 void render32bpp()
 {
    byte bCount = *RendWid++;
-   dword *dst = reinterpret_cast<dword*>(CPC.scr_pos);
+   // memcpy store: see render16bpp() above for why a direct
+   // reinterpret_cast<dword*> store is unsafe here.
+   byte *dst = CPC.scr_pos;
    // Global variable privatization
    const byte *src = RendOut;
    const dword *pal = GateArray.palette;
    while (bCount--) {
-      *dst++ = pal[*src++];
+      dword val = pal[*src++];
+      memcpy(dst, &val, sizeof(val));
+      dst += sizeof(val);
    }
    RendOut = const_cast<byte*>(src);
-   CPC.scr_pos = reinterpret_cast<byte*>(dst);
+   CPC.scr_pos = dst;
 }
 
 
@@ -1128,18 +1155,20 @@ void render32bpp()
 void render32bpp_doubleY()
 {
    byte bCount = *RendWid++;
-   dword *dst1 = reinterpret_cast<dword*>(CPC.scr_pos);
-   dword *dst2 = reinterpret_cast<dword*>(CPC.scr_pos + CPC.scr_bps);
+   byte *dst1 = CPC.scr_pos;
+   byte *dst2 = CPC.scr_pos + CPC.scr_bps;
    // Global variable privatization
    const byte *src = RendOut;
    const dword *pal = GateArray.palette;
    while (bCount--) {
       dword val = pal[*src++];
-      *dst1++ = val;
-      *dst2++ = val;
+      memcpy(dst1, &val, sizeof(val));
+      memcpy(dst2, &val, sizeof(val));
+      dst1 += sizeof(val);
+      dst2 += sizeof(val);
    }
    RendOut = const_cast<byte*>(src);
-   CPC.scr_pos = reinterpret_cast<byte*>(dst1);
+   CPC.scr_pos = dst1;
 }
 
 
