@@ -1272,8 +1272,11 @@ int emulator_init ()
    byte *pchRomData;
 
    CRASH_CHECKPOINT("emulator_init: before buffer allocations");
-   fprintf(stderr, "emulator_init: CPC.model=%u CPC.ram_size=%uKB\n", (unsigned)CPC.model, (unsigned)CPC.ram_size);
-   fflush(stderr);
+   {
+      char buf[96];
+      snprintf(buf, sizeof(buf), "cap32.cpp:%d - emulator_init: model=%d ram_size=%dKB", __LINE__, CPC.model, CPC.ram_size);
+      ::crashlog::checkpoint(buf);
+   }
    pbGPBuffer = new byte [128*1024]; // attempt to allocate the general purpose buffer
    pbRAMbuffer = new byte [CPC.ram_size*1024 + 1]; // allocate memory for desired amount of RAM
    // Ensure 1 byte is available before pbRAM as prerender_normal*_plus can read it

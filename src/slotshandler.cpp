@@ -488,9 +488,13 @@ int dsk_load (FILE *pfile, t_drive *drive)
     return ERR_DSK_INVALID;
   }
   pbPtr = dsk_header;
-  fprintf(stderr, "dsk_load: header id='%.8s' tracks=%u sides=%u\n",
-          pbPtr, (unsigned)*(pbPtr + 0x30), (unsigned)*(pbPtr + 0x31));
-  fflush(stderr);
+  {
+    char buf[128];
+    char id8[9]; memcpy(id8, pbPtr, 8); id8[8] = '\0';
+    snprintf(buf, sizeof(buf), "slotshandler.cpp:%d - dsk_load: id='%s' tracks=%u sides=%u",
+             __LINE__, id8, (unsigned)*(pbPtr + 0x30), (unsigned)*(pbPtr + 0x31));
+    ::crashlog::checkpoint(buf);
+  }
 
   if (memcmp(pbPtr, "MV - CPC", 8) == 0) { // normal DSK image?
     LOG_DEBUG("Loading normal disk");
