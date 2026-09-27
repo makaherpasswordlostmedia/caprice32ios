@@ -47,13 +47,32 @@ word Amplitudes_AY[16] = {
 
 int Level_PP[256];
 
-union TLoopCount {
-   struct {
-      dword Lo;
-      dword Hi;
-   };
-   int64_t Re;
-} LoopCount;
+// NOTE: these must not be unions of {dword Lo, Hi;} with int64_t Re;.
+// A union containing an int64_t member requires the union itself to sit
+// at an 8-byte-aligned address for the int64_t access to be valid, but
+// nothing here actually guarantees that placement on this armv7/iOS
+// toolchain (globals are laid out by the linker without regard to a
+// union's internal alignment need if the surrounding translation unit
+// doesn't force it). A direct read/write of `.Re` then compiles to a
+// strict-alignment 64-bit access and SIGBUS's (EXC_ARM_DA_ALIGN) the
+// moment the object lands on a non-8-aligned address. Plain fields +
+// memcpy accessors sidestep the alignment requirement entirely.
+struct TLoopCount {
+   dword Lo;
+   dword Hi;
+   int64_t Re() const {
+      int64_t v;
+      memcpy(&v, this, sizeof(v));
+      return v;
+   }
+   void set_Re(int64_t v) {
+      memcpy(this, &v, sizeof(v));
+   }
+   void add_Re(int64_t delta) {
+      set_Re(Re() + delta);
+   }
+};
+TLoopCount LoopCount;
 int64_t LoopCountInit;
 
 bool Ton_EnA, Ton_EnB, Ton_EnC, Noise_EnA, Noise_EnB, Noise_EnC;
@@ -77,13 +96,20 @@ union TNoise {
    dword Seed;
 } Noise;
 
-union TEnvelopeCounter {
-   struct {
-      dword Lo;
-      dword Hi;
-   };
-   int64_t Re;
-} Envelope_Counter;
+// See TLoopCount above for why this can't be a union with int64_t Re.
+struct TEnvelopeCounter {
+   dword Lo;
+   dword Hi;
+   int64_t Re() const {
+      int64_t v;
+      memcpy(&v, this, sizeof(v));
+      return v;
+   }
+   void set_Re(int64_t v) {
+      memcpy(this, &v, sizeof(v));
+   }
+};
+TEnvelopeCounter Envelope_Counter;
 byte Ton_A, Ton_B, Ton_C;
 
 int Level_AR[32], Level_AL[32], Level_BR[32], Level_BL[32], Level_CR[32], Level_CL[32];
@@ -458,7 +484,7 @@ void Synthesizer_Stereo16()
       Tick_Counter++;
       LoopCount.Hi--;
    }
-   LoopCount.Re += LoopCountInit;
+   LoopCount.add_Re(LoopCountInit);
    reg_pair val;
    val.w.l = Left_Chan / Tick_Counter;
    val.w.h = Right_Chan / Tick_Counter;
@@ -483,7 +509,7 @@ void Synthesizer_Stereo8()
       Tick_Counter++;
       LoopCount.Hi--;
    }
-   LoopCount.Re += LoopCountInit;
+   LoopCount.add_Re(LoopCountInit);
    reg_pair val;
    val.b.l = 128 + Left_Chan / Tick_Counter;
    val.b.h = 128 + Right_Chan / Tick_Counter;
@@ -591,7 +617,7 @@ void Synthesizer_Mono16()
       Tick_Counter++;
       LoopCount.Hi--;
    }
-   LoopCount.Re += LoopCountInit;
+   LoopCount.add_Re(LoopCountInit);
    *reinterpret_cast<word *>(CPC.snd_bufferptr) = Left_Chan / Tick_Counter; // write to mixing buffer
    CPC.snd_bufferptr += 2;
    Left_Chan = 0;
@@ -612,7 +638,7 @@ void Synthesizer_Mono8()
       Tick_Counter++;
       LoopCount.Hi--;
    }
-   LoopCount.Re += LoopCountInit;
+   LoopCount.add_Re(LoopCountInit);
    *reinterpret_cast<byte *>(CPC.snd_bufferptr) = 128 + Left_Chan / Tick_Counter; // write to mixing buffer
    CPC.snd_bufferptr++;
    Left_Chan = 0;
@@ -711,7 +737,7 @@ void ResetAYChipEmulation()
    Ton_Counter_B.Re = 0;
    Ton_Counter_C.Re = 0;
    Noise_Counter.Re = 0;
-   Envelope_Counter.Re = 0;
+   Envelope_Counter.set_Re(0);
    Ton_A = 0;
    Ton_B = 0;
    Ton_C = 0;
@@ -730,7 +756,7 @@ void InitAYCounterVars()
       CPC.snd_cycle_count_init_both())); // number of AY counter increments per sample
    LOG_INFO("Timing: CPC.speed: " << CPC.speed << " - freq: " << freq_table[CPC.snd_playback_rate]);
    LOG_INFO("Timing: z80 cycles per sample: " << CPC.snd_cycle_count_init_both()/4294967296.0 << " - LoopCountInit: " << LoopCountInit/4294967296.0);
-   LoopCount.Re = LoopCountInit;
+   LoopCount.set_Re(LoopCountInit);
 }
 
 
