@@ -1068,6 +1068,15 @@ int z80_execute()
       }
 
       z80_execute_instruction();
+      // Second, distinct marker recorded right after the instruction
+      // completes. If a crash's "last checkpoint" is an OUT/IN port
+      // handler but the actual fault is in the *next* fetch/decode
+      // (corrupted PC, bad opcode table jump, etc), this tells them
+      // apart: g_last_pc will already have moved on past the
+      // instruction that logged the port checkpoint, confirming the
+      // fault happened after that instruction fully retired rather
+      // than inside the handler itself.
+      crashlog::checkpoint_fast("z80.cpp:z80_execute: instruction retired");
 
       z80_wait_states
 
