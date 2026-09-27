@@ -1,3 +1,6 @@
+#ifndef Z80DAA_H
+#define Z80DAA_H
+
 /* Caprice32 - Amstrad CPC Emulator
    (c) Copyright 1997-2004 Ulrich Doewich
 
@@ -2077,3 +2080,4 @@ static word DAATable[0x800] = {
   (0x99<<8)+SF         +XF+VF+NF+CF
 };
 
+#endif // Z80DAA_H

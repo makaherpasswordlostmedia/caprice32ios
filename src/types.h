@@ -1,3 +1,6 @@
+#ifndef TYPES_H
+#define TYPES_H
+
 #include <cstdint>
 #include <cstring>
 
@@ -38,3 +41,5 @@ static inline void store_le16(void *p, word v) {
 static inline void store_le32(void *p, dword v) {
    std::memcpy(p, &v, sizeof(v));
 }
+
+#endif // TYPES_H

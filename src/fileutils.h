@@ -1,3 +1,6 @@
+#ifndef FILEUTILS_H
+#define FILEUTILS_H
+
 // Caprice 32
 // File IO functions
 
@@ -23,3 +26,5 @@ std::vector<std::string> listDirectoryExt(std::string &, const std::string &);
 
 // Returns a string describing current date and time (YYYYMMDD_HHmmss format)
 std::string getDateString();
+
+#endif // FILEUTILS_H

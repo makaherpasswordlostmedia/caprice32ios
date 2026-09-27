@@ -1,3 +1,6 @@
+#ifndef SLOTSHANDLER_H
+#define SLOTSHANDLER_H
+
 /* Caprice32 - Amstrad CPC Emulator
    (c) Copyright 1997-2005 Ulrich Doewich
 
@@ -51,3 +54,4 @@ void loadSlots();
 t_disk_format parseDiskFormat(const std::string& format);
 std::string serializeDiskFormat(const t_disk_format& format);
 
+#endif // SLOTSHANDLER_H
