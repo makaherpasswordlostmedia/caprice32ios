@@ -47,6 +47,7 @@
 #include "fileutils.h"
 #include "net4cpc.h"
 #include "symfile.h"
+#include "crashlog.h"
 
 #include <errno.h>
 #include <cstring>
@@ -1148,16 +1149,19 @@ int input_init ()
 
 int emulator_init ()
 {
+   CRASH_CHECKPOINT("emulator_init: before input_init");
    if (input_init()) {
       fprintf(stderr, "input_init() failed. Aborting.\n");
       exit(-1);
    }
 
    // Cartridge must be loaded before init as ROM needs to be present.
+   CRASH_CHECKPOINT("emulator_init: before cartridge_load");
    cartridge_load();
    int iErr, iRomNum;
    byte *pchRomData;
 
+   CRASH_CHECKPOINT("emulator_init: before buffer allocations");
    pbGPBuffer = new byte [128*1024]; // attempt to allocate the general purpose buffer
    pbRAMbuffer = new byte [CPC.ram_size*1024 + 1]; // allocate memory for desired amount of RAM
    // Ensure 1 byte is available before pbRAM as prerender_normal*_plus can read it
@@ -1168,11 +1172,14 @@ int emulator_init ()
    pbROMhi =
    pbExpansionROM = pbROM + 16384;
    memset(memmap_ROM, 0, sizeof(memmap_ROM[0]) * 256); // clear the expansion ROM map
+   CRASH_CHECKPOINT("emulator_init: before ga_init_banking");
    ga_init_banking(membank_config, GateArray.RAM_bank); // init the CPC memory banking map
+   CRASH_CHECKPOINT("emulator_init: before emulator_patch_ROM");
    if ((iErr = emulator_patch_ROM())) {
       LOG_ERROR("Failed patching the ROM");
       return iErr;
    }
+   CRASH_CHECKPOINT("emulator_init: before ROM loading loop");
 
    for (iRomNum = 0; iRomNum < 16; iRomNum++) { // loop for ROMs 0-15
       if (!CPC.rom_file[iRomNum].empty()) { // is a ROM image specified for this slot?
@@ -1405,6 +1412,7 @@ int audio_init ()
 {
    SDL_AudioSpec desired, obtained;
 
+   CRASH_CHECKPOINT("audio_init: entered");
    if (!CPC.snd_enabled) {
       return 0;
    }
@@ -1422,6 +1430,7 @@ int audio_init ()
    desired.callback = audio_update;
    desired.userdata = nullptr;
 
+   CRASH_CHECKPOINT("audio_init: before SDL_OpenAudioDevice");
    audio_device_id = SDL_OpenAudioDevice(nullptr, 0, &desired, &obtained, 0 /* no change allowed */);
    if (audio_device_id == 0) {
       LOG_ERROR("Could not open audio: " << SDL_GetError());
@@ -1432,6 +1441,7 @@ int audio_init ()
    LOG_VERBOSE("Audio: Desired: Freq: " << desired.freq << ", Format: " << desired.format << ", Channels: " << static_cast<int>(desired.channels) << ", Samples: " << desired.samples << ", Size: " << desired.size);
    LOG_VERBOSE("Audio: Obtained: Freq: " << obtained.freq << ", Format: " << obtained.format << ", Channels: " << static_cast<int>(obtained.channels) << ", Samples: " << obtained.samples << ", Size: " << obtained.size);
 
+   CRASH_CHECKPOINT("audio_init: before sound buffer allocation");
    CPC.snd_buffersize = obtained.size; // size is samples * channels * bytes per sample (1 or 2)
    pbSndBuffer = std::make_unique<byte[]>(CPC.snd_buffersize); // allocate the sound data buffer
    pbSndBufferEnd = pbSndBuffer.get() + CPC.snd_buffersize;
@@ -1440,7 +1450,9 @@ int audio_init ()
    CPC.snd_ready = true;
    LOG_VERBOSE("Audio: Sound buffer ready");
 
+   CRASH_CHECKPOINT("audio_init: before InitAY");
    InitAY();
+   CRASH_CHECKPOINT("audio_init: before SetAYRegister loop");
 
    for (int n = 0; n < 16; n++) {
       SetAYRegister(n, PSG.RegisterAY.Index[n]); // init sound emulation with valid values
@@ -2758,6 +2770,8 @@ std::map<SDL_Scancode, std::string> scancode_names = {
 
 int cap32_main (int argc, char **argv)
 {
+   crashlog::init();
+   CRASH_CHECKPOINT("cap32_main entered");
    int iExitCondition;
    bool take_screenshot = false;
    bool bin_loaded = false;
@@ -2828,24 +2842,31 @@ int cap32_main (int argc, char **argv)
       strncpy(chAppPath,APP_PATH,_MAX_PATH);
    #endif
 
+   CRASH_CHECKPOINT("before loadConfiguration");
    loadConfiguration(CPC, getConfigurationFilename()); // retrieve the emulator configuration
+   CRASH_CHECKPOINT("after loadConfiguration, before printer_start");
    if (CPC.printer) {
       if (!printer_start()) { // start capturing printer output, if enabled
          CPC.printer = 0;
       }
    }
 
+   CRASH_CHECKPOINT("before z80_init_tables");
    z80_init_tables(); // init Z80 emulation
+   CRASH_CHECKPOINT("after z80_init_tables, before video_init");
 
    fprintf(stderr, "TRACE: before video_init\n"); fflush(stderr);
+   CRASH_CHECKPOINT("before video_init");
    if (video_init()) {
       fprintf(stderr, "video_init() failed. Aborting.\n");
       cleanExit(-1);
    }
    fprintf(stderr, "TRACE: after video_init, before mouse_init\n"); fflush(stderr);
+   CRASH_CHECKPOINT("after video_init, before mouse_init");
    mouse_init();
 
    fprintf(stderr, "TRACE: after mouse_init, before audio_init\n"); fflush(stderr);
+   CRASH_CHECKPOINT("after mouse_init, before audio_init");
    if (audio_init()) {
       fprintf(stderr, "audio_init() failed. Disabling sound.\n");
       // TODO(cpitrat): Do not set this to 0 when audio_init fail as this affect
@@ -2855,11 +2876,13 @@ int cap32_main (int argc, char **argv)
       CPC.snd_enabled = 0; // disable sound emulation
    }
    fprintf(stderr, "TRACE: after audio_init, before joysticks_init\n"); fflush(stderr);
+   CRASH_CHECKPOINT("after audio_init, before joysticks_init");
 
    if (joysticks_init()) {
       fprintf(stderr, "joysticks_init() failed. Joysticks won't work.\n");
    }
    fprintf(stderr, "TRACE: after joysticks_init, before fillSlots\n"); fflush(stderr);
+   CRASH_CHECKPOINT("after joysticks_init, before fillSlots");
 
 #ifdef DEBUG
    pfoDebug = fopen("./debug.txt", "wt");
@@ -2868,10 +2891,12 @@ int cap32_main (int argc, char **argv)
    // Extract files to be loaded from the command line args
    fillSlots(slot_list, CPC);
    fprintf(stderr, "TRACE: after fillSlots, before InputMapper\n"); fflush(stderr);
+   CRASH_CHECKPOINT("after fillSlots, before InputMapper");
 
    // Must be done before emulator_init()
    CPC.InputMapper = new InputMapper(&CPC);
    fprintf(stderr, "TRACE: after InputMapper, before emulator_init\n"); fflush(stderr);
+   CRASH_CHECKPOINT("after InputMapper, before emulator_init");
 
    // emulator_init must be called before loading files as they require
    // pbGPBuffer to be initialized.
@@ -2880,10 +2905,12 @@ int cap32_main (int argc, char **argv)
       cleanExit(-1);
    }
    fprintf(stderr, "TRACE: after emulator_init, before loadSlots\n"); fflush(stderr);
+   CRASH_CHECKPOINT("after emulator_init, before loadSlots");
 
    // Really load the various drives, if needed
    loadSlots();
    fprintf(stderr, "TRACE: after loadSlots, before StringToEvents\n"); fflush(stderr);
+   CRASH_CHECKPOINT("after loadSlots, before StringToEvents");
 
    // Fill the buffer with autocmd if provided
    virtualKeyboardEvents = CPC.InputMapper->StringToEvents(args.autocmd);
@@ -2893,13 +2920,17 @@ int cap32_main (int argc, char **argv)
 // ----------------------------------------------------------------------------
 
    fprintf(stderr, "TRACE: before update_timings\n"); fflush(stderr);
+   CRASH_CHECKPOINT("before update_timings");
    update_timings();
    fprintf(stderr, "TRACE: after update_timings, before audio_resume\n"); fflush(stderr);
+   CRASH_CHECKPOINT("after update_timings, before audio_resume");
    audio_resume();
    fprintf(stderr, "TRACE: after audio_resume, before loadBreakpoints\n"); fflush(stderr);
+   CRASH_CHECKPOINT("after audio_resume, before loadBreakpoints");
 
    loadBreakpoints();
    fprintf(stderr, "TRACE: after loadBreakpoints, entering main loop\n"); fflush(stderr);
+   CRASH_CHECKPOINT("after loadBreakpoints, entering main loop");
 
    iExitCondition = EC_FRAME_COMPLETE;
 
