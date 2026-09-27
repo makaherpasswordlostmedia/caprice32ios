@@ -38,6 +38,22 @@
 #include "SDL_opengl.h"
 #endif
 #include <math.h>
+
+// SDL_WINDOW_FULLSCREEN_DESKTOP makes SDL resolve the window size
+// against the target display's current mode, which on the UIKit
+// backend walks _this->displays. On some A5/A5X/A6 iOS devices
+// (iPad 2/3/4/mini 1, iPhone 4s) this runs before the backend has
+// finished enumerating UIScreen objects, and SDL_GetDisplay() asserts
+// on a null displays array ('_this->displays != ((void*)0)').
+// Plain SDL_WINDOW_FULLSCREEN skips that resolution step - UIKit
+// fullscreens the window either way, so behavior is unchanged, we
+// just avoid the display query that isn't ready yet at this point
+// in the launch sequence.
+#ifdef __APPLE__
+#define CAP32_FULLSCREEN_FLAG SDL_WINDOW_FULLSCREEN
+#else
+#define CAP32_FULLSCREEN_FLAG SDL_WINDOW_FULLSCREEN_DESKTOP
+#endif
 #include <memory>
 #include <iostream>
 
@@ -125,7 +141,7 @@ void compute_scale(video_plugin* t, int w, int h)
 /* ------------------------------------------------------------------------------------ */
 SDL_Surface* direct_init(video_plugin* t, int scale, bool fs)
 {
-  SDL_CreateWindowAndRenderer(CPC_VISIBLE_SCR_WIDTH*scale, CPC_VISIBLE_SCR_HEIGHT*scale, (fs?SDL_WINDOW_FULLSCREEN_DESKTOP:SDL_WINDOW_SHOWN), &mainSDLWindow, &renderer);
+  SDL_CreateWindowAndRenderer(CPC_VISIBLE_SCR_WIDTH*scale, CPC_VISIBLE_SCR_HEIGHT*scale, (fs?CAP32_FULLSCREEN_FLAG:SDL_WINDOW_SHOWN), &mainSDLWindow, &renderer);
   if (!mainSDLWindow || !renderer) return nullptr;
   SDL_SetWindowTitle(mainSDLWindow, "Caprice32 " VERSION_STRING);
   int surface_width, surface_height;
@@ -201,7 +217,7 @@ SDL_Surface* glscale_init(video_plugin* t, int scale, bool fs)
 
   int width = CPC_VISIBLE_SCR_WIDTH*scale;
   int height = CPC_VISIBLE_SCR_HEIGHT*scale;
-  SDL_CreateWindowAndRenderer(width, height, (fs?SDL_WINDOW_FULLSCREEN_DESKTOP:SDL_WINDOW_SHOWN) | SDL_WINDOW_OPENGL, &mainSDLWindow, &renderer);
+  SDL_CreateWindowAndRenderer(width, height, (fs?CAP32_FULLSCREEN_FLAG:SDL_WINDOW_SHOWN) | SDL_WINDOW_OPENGL, &mainSDLWindow, &renderer);
   if (!mainSDLWindow || !renderer) return nullptr;
   if (fs) {
     SDL_DisplayMode display;
@@ -558,7 +574,7 @@ void compute_rects_for_tests(SDL_Rect* src, SDL_Rect* dst, Uint8 half_pixels)
 
 SDL_Surface* swscale_init(video_plugin* t, int scale, bool fs)
 {
-  SDL_CreateWindowAndRenderer(CPC_VISIBLE_SCR_WIDTH*scale, CPC_VISIBLE_SCR_HEIGHT*scale, (fs?SDL_WINDOW_FULLSCREEN_DESKTOP:SDL_WINDOW_SHOWN), &mainSDLWindow, &renderer);
+  SDL_CreateWindowAndRenderer(CPC_VISIBLE_SCR_WIDTH*scale, CPC_VISIBLE_SCR_HEIGHT*scale, (fs?CAP32_FULLSCREEN_FLAG:SDL_WINDOW_SHOWN), &mainSDLWindow, &renderer);
   if (!mainSDLWindow || !renderer) return nullptr;
   SDL_SetWindowTitle(mainSDLWindow, "Caprice32 " VERSION_STRING);
   int surface_width, surface_height;
