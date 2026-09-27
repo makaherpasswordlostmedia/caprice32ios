@@ -1272,6 +1272,8 @@ int emulator_init ()
    byte *pchRomData;
 
    CRASH_CHECKPOINT("emulator_init: before buffer allocations");
+   fprintf(stderr, "emulator_init: CPC.model=%u CPC.ram_size=%uKB\n", (unsigned)CPC.model, (unsigned)CPC.ram_size);
+   fflush(stderr);
    pbGPBuffer = new byte [128*1024]; // attempt to allocate the general purpose buffer
    pbRAMbuffer = new byte [CPC.ram_size*1024 + 1]; // allocate memory for desired amount of RAM
    // Ensure 1 byte is available before pbRAM as prerender_normal*_plus can read it
@@ -1987,7 +1989,23 @@ void loadConfiguration (t_CPC &CPC, const std::string& configFilename)
       CPC.model = 2;
    }
    CPC.jumpers = conf.getIntValue("system", "jumpers", 0x1e) & 0x1e; // OEM is Amstrad, video refresh is 50Hz
-   CPC.ram_size = conf.getIntValue("system", "ram_size", 128) & 0x02c0; // 128KB RAM
+   // Previously: `& 0x02c0`, a bitmask that doesn't correspond to any
+   // sensible validation of a KB size - most real values (64, 192, 320)
+   // AND to 0, and even the intended default (128) only survived by
+   // coincidence. A ram_size of 0 flows straight into
+   // `new byte[CPC.ram_size*1024 + 1]` in emulator_init(), allocating a
+   // 1-byte buffer that ga_init_banking() and the Z80 core then treat as
+   // full-size CPC RAM - every subsequent memory access after that is
+   // out of bounds, which is the exact mechanism behind the SIGBUS this
+   // was chased from (faulting far outside the real heap allocation).
+   // Validate explicitly instead: only accept sizes that are an exact
+   // multiple of 64KB within the range a real CPC (64KB) or CPC+/6128
+   // (up to 576KB) can have.
+   CPC.ram_size = conf.getIntValue("system", "ram_size", 128);
+   if ((CPC.ram_size <= 0) || (CPC.ram_size % 64 != 0) || (CPC.ram_size > 576)) {
+      LOG_ERROR("Invalid ram_size in configuration (" << CPC.ram_size << "), defaulting to 128KB");
+      CPC.ram_size = 128;
+   }
    if (CPC.ram_size > 576) {
       CPC.ram_size = 576;
    } else if ((CPC.model >= 2) && (CPC.ram_size < 128)) {
