@@ -2941,6 +2941,7 @@ int cap32_main (int argc, char **argv)
       if (!bin_loaded &&
           dwFrameCountOverall > CPC.boot_time) {
           bin_loaded = true;
+          CRASH_CHECKPOINT("main loop: before bin_load");
           if (!args.binFile.empty()) bin_load(args.binFile, args.binOffset);
       }
 
@@ -3346,8 +3347,10 @@ int cap32_main (int argc, char **argv)
          CPC.scr_pos = CPC.scr_base + dwOffset; // update current rendering position
 
          if (dwFrameCountOverall < 5) { fprintf(stderr, "TRACE: frame %u before z80_execute\n", dwFrameCountOverall); fflush(stderr); }
+         CRASH_CHECKPOINT_FAST("main loop: before z80_execute");
          iExitCondition = z80_execute(); // run the emulation until an exit condition is met
          if (dwFrameCountOverall < 5) { fprintf(stderr, "TRACE: frame %u after z80_execute, condition=%d\n", dwFrameCountOverall, iExitCondition); fflush(stderr); }
+         CRASH_CHECKPOINT_FAST("main loop: after z80_execute");
 
          if (iExitCondition == EC_BREAKPOINT) {
             if (z80.breakpoint_reached || z80.watchpoint_reached) {
@@ -3377,6 +3380,7 @@ int cap32_main (int argc, char **argv)
             dwFrameCountOverall++;
             dwFrameCount++;
             if (dwFrameCountOverall < 5) { fprintf(stderr, "TRACE: frame %u EC_FRAME_COMPLETE, before OSD/print\n", dwFrameCountOverall); fflush(stderr); }
+            CRASH_CHECKPOINT_FAST("main loop: EC_FRAME_COMPLETE, before OSD/print");
             if (SDL_GetTicks() < osd_timing) {
                print(static_cast<byte *>(back_surface->pixels) + CPC.scr_line_offs, osd_message.c_str(), true);
             } else if (CPC.scr_fps) {
@@ -3385,10 +3389,13 @@ int cap32_main (int argc, char **argv)
                print(static_cast<byte *>(back_surface->pixels) + CPC.scr_line_offs, chStr, true); // display the frames per second counter
             }
             if (dwFrameCountOverall < 5) { fprintf(stderr, "TRACE: frame %u before asic_draw_sprites\n", dwFrameCountOverall); fflush(stderr); }
+            CRASH_CHECKPOINT_FAST("main loop: before asic_draw_sprites");
             asic_draw_sprites();
             if (dwFrameCountOverall < 5) { fprintf(stderr, "TRACE: frame %u before video_display\n", dwFrameCountOverall); fflush(stderr); }
+            CRASH_CHECKPOINT_FAST("main loop: before video_display");
             video_display(); // update PC display
             if (dwFrameCountOverall < 5) { fprintf(stderr, "TRACE: frame %u after video_display\n", dwFrameCountOverall); fflush(stderr); }
+            CRASH_CHECKPOINT_FAST("main loop: after video_display");
             if (take_screenshot) {
               dumpScreen();
               take_screenshot = false;

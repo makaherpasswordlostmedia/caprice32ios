@@ -36,6 +36,7 @@
 #include <iomanip>
 
 #include "z80_macros.h"
+#include "crashlog.h"
 
 extern t_CPC CPC;
 extern t_FDC FDC;
@@ -1057,6 +1058,8 @@ int z80_execute()
 //    }
       dbg_z80_lastPC = _PC;
       #endif
+
+      crashlog::set_last_pc(_PCdword);
 
       if (dwMF2Flags & MF2_RUNNING) {
          if (_PCdword == dwMF2ExitAddr) { // have we returned from the MF2?

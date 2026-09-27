@@ -54,6 +54,12 @@ inline char g_checkpoint[256] = "no checkpoint reached yet";
 
 inline char g_log_path[512] = {0};
 
+// Extremely low-overhead "current PC" tracker for the emulation hot path
+// (checked once per Z80 instruction - can't afford string formatting or
+// even a strcpy there). Just an integer written with relaxed atomics;
+// the signal handler formats it as hex only if/when a crash happens.
+inline std::atomic<unsigned int> g_last_pc{0xFFFFFFFFu};
+
 // Async-signal-safe unsigned-to-hex. writes into buf, returns length.
 inline int u32_to_hex(unsigned int v, char *buf) {
    static const char *digits = "0123456789abcdef";
@@ -117,7 +123,15 @@ inline void signal_handler(int sig, siginfo_t *info, void *ucontext) {
    const char *cp_lbl = "\nlast checkpoint: ";
    while (*cp_lbl) buf[p++] = *cp_lbl++;
    const char *cp = g_checkpoint;
-   while (*cp && p < sizeof(buf) - 8) buf[p++] = *cp++;
+   while (*cp && p < sizeof(buf) - 80) buf[p++] = *cp++;
+
+   const char *pc_lbl = "\nlast z80 PC: 0x";
+   while (*pc_lbl) buf[p++] = *pc_lbl++;
+   unsigned int last_pc = g_last_pc.load(std::memory_order_relaxed);
+   char pcbuf[8];
+   int pclen = u32_to_hex(last_pc, pcbuf);
+   for (int i = 0; i < pclen; i++) buf[p++] = pcbuf[i];
+
    buf[p++] = '\n';
    buf[p] = '\0';
 
@@ -232,8 +246,32 @@ inline void checkpoint(const char *msg) {
    detail::safe_write(line);
 }
 
+// Like checkpoint(), but only updates the in-memory "last known" value -
+// it does not touch disk. Use this for anything in a hot path (called
+// every frame or every instruction): the signal handler still picks up
+// the latest value on crash (that's all it ever reads), but we avoid an
+// open()/write()/close() per call, which would otherwise tank emulation
+// speed. Use plain checkpoint() for anything that only runs a handful of
+// times during startup/shutdown, where the disk write is effectively
+// free and gives a trail even in the (rare) case of a hard kill that no
+// signal handler catches.
+inline void checkpoint_fast(const char *msg) {
+   size_t i = 0;
+   while (msg[i] && i < sizeof(detail::g_checkpoint) - 1) {
+      detail::g_checkpoint[i] = msg[i];
+      i++;
+   }
+   detail::g_checkpoint[i] = '\0';
+}
+
 inline const char *path() {
    return detail::g_log_path;
+}
+
+// Call this once per instruction/frame in the emulation hot path. Cheap:
+// just an atomic store, no formatting, no I/O.
+inline void set_last_pc(unsigned int pc) {
+   detail::g_last_pc.store(pc, std::memory_order_relaxed);
 }
 
 } // namespace crashlog
@@ -241,5 +279,6 @@ inline const char *path() {
 #define CRASH_LOG_STRINGIFY_(x) #x
 #define CRASH_LOG_STRINGIFY(x) CRASH_LOG_STRINGIFY_(x)
 #define CRASH_CHECKPOINT(msg) ::crashlog::checkpoint(__FILE__ ":" CRASH_LOG_STRINGIFY(__LINE__) " - " msg)
+#define CRASH_CHECKPOINT_FAST(msg) ::crashlog::checkpoint_fast(__FILE__ ":" CRASH_LOG_STRINGIFY(__LINE__) " - " msg)
 
 #endif
