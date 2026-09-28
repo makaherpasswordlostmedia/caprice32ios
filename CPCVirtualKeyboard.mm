@@ -102,6 +102,19 @@ static CPCKeyDef *KS(NSString *label, NSString *shifted, SDL_Keycode sym, CGFloa
     return k;
 }
 
+// CPC "@" key. Plain tap = '@' (host Shift+2). With on-screen SHIFT
+// armed the CPC prints '|' (CPC_PIPE = SDLK_BACKSLASH|SHIFT in the core
+// map) - needed for |A, |B, |CPM, |TAPE etc. to switch drives/load discs.
+static CPCKeyDef *KAT(NSString *label, NSString *shifted, CGFloat w)
+{
+    CPCKeyDef *k = K(label, shifted, SDLK_2, w);
+    k.baseShift = YES;
+    k.hasShiftOverride = YES;
+    k.shiftSym = SDLK_BACKSLASH;
+    k.shiftSymNeedsShift = YES;
+    return k;
+}
+
 static CPCKeyDef *KMod(NSString *label, SDL_Keycode sym, CGFloat w, CPCKeyKind kind)
 {
     CPCKeyDef *k = K(label, nil, sym, w);
@@ -151,8 +164,8 @@ static NSArray<NSArray<CPCKeyDef *> *> *BuildLayout(void)
            K(@"E", nil, SDLK_e, 1.0), K(@"R", nil, SDLK_r, 1.0),
            K(@"T", nil, SDLK_t, 1.0), K(@"Y", nil, SDLK_y, 1.0),
            K(@"U", nil, SDLK_u, 1.0), K(@"I", nil, SDLK_i, 1.0),
-           K(@"O", nil, SDLK_o, 1.0), KO(@"P", @"|", SDLK_p, SDLK_BACKSLASH, YES, 1.0),
-           KS(@"@", nil, SDLK_2, 1.0),    // CPC_AT = SDLK_2|SHIFT
+           K(@"O", nil, SDLK_o, 1.0), K(@"P", nil, SDLK_p, 1.0),
+           KAT(@"@", @"|", 1.0),         // CPC_AT = SDLK_2|SHIFT; with SHIFT armed -> CPC_PIPE = SDLK_BACKSLASH|SHIFT
            K(@"[", @"{", SDLK_LEFTBRACKET, 1.0),
            KN(@"RETURN", SDLK_RETURN, 1.9) ],
 
