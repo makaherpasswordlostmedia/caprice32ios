@@ -171,6 +171,31 @@ static void RedirectStdioToDocuments(NSString *documentsPath)
     }
 }
 
+// Returns the most recently modified file in `dir` (non-recursive) whose
+// extension matches one of `exts` (lowercase, no dot), or nil.
+// Used so that dropping a .dsk into Documents (Files app / iTunes file
+// sharing) is enough - no need to go through "Open in..." every time.
+static NSString *NewestFileWithExtensions(NSString *dir, NSArray<NSString *> *exts)
+{
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray<NSString *> *names = [fm contentsOfDirectoryAtPath:dir error:nil];
+    NSString *best = nil;
+    NSDate *bestDate = nil;
+    for (NSString *name in names) {
+        if (![exts containsObject:name.pathExtension.lowercaseString]) continue;
+        NSString *full = [dir stringByAppendingPathComponent:name];
+        BOOL isDir = NO;
+        if (![fm fileExistsAtPath:full isDirectory:&isDir] || isDir) continue;
+        NSDictionary *attrs = [fm attributesOfItemAtPath:full error:nil];
+        NSDate *d = attrs[NSFileModificationDate] ?: [NSDate distantPast];
+        if (!bestDate || [d compare:bestDate] == NSOrderedDescending) {
+            best = full;
+            bestDate = d;
+        }
+    }
+    return best;
+}
+
 int main(int argc, char *argv[])
 {
     @autoreleasepool {
@@ -224,6 +249,22 @@ int main(int argc, char *argv[])
         if (pendingFile.length > 0) {
             args.push_back(std::string(pendingFile.UTF8String));
             [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"CaprisePendingOpenFile"];
+        } else {
+            // Nothing was handed to us via "Open in...": auto-insert the
+            // newest disk / tape / snapshot / cartridge found in
+            // Documents. One of each kind at most (fillSlots takes the
+            // first per slot anyway). The full path is always long
+            // enough for fillSlots()' >5 char check.
+            NSString *dsk = NewestFileWithExtensions(documentsPath, @[ @"dsk" ]);
+            NSString *tape = NewestFileWithExtensions(documentsPath, @[ @"cdt", @"voc" ]);
+            NSString *sna = NewestFileWithExtensions(documentsPath, @[ @"sna" ]);
+            NSString *cpr = NewestFileWithExtensions(documentsPath, @[ @"cpr" ]);
+            for (NSString *f in @[ dsk ?: @"", tape ?: @"", sna ?: @"", cpr ?: @"" ]) {
+                if (f.length > 0) {
+                    args.push_back(std::string(f.UTF8String));
+                    NSLog(@"Caprice32: auto-inserting %@", f);
+                }
+            }
         }
 
         std::vector<char *> cargv;
