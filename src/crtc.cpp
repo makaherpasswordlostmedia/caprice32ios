@@ -37,8 +37,16 @@
 // address compiles to a strict-alignment instruction and SIGBUS's
 // (EXC_ARM_DA_ALIGN). memcpy has no alignment requirement, so route every
 // dword store through this tiny helper instead of *ptr++ = value.
-static inline void store_dword(dword *dst, dword val) {
-   memcpy(dst, &val, sizeof(val));
+static inline void store_dword(byte *dst, dword val) {
+   // dst is deliberately a byte*, not dword*: with a dword* parameter the
+   // compiler is entitled to assume 4-byte alignment and may fuse this
+   // memcpy into STM/STRD/LDRD, which fault (SIGBUS) on a misaligned
+   // address on armv7 even though a plain STR would not. Going through
+   // an explicit byte-wise store removes that assumption entirely.
+   dst[0] = static_cast<byte>(val);
+   dst[1] = static_cast<byte>(val >> 8);
+   dst[2] = static_cast<byte>(val >> 16);
+   dst[3] = static_cast<byte>(val >> 24);
 }
 
 extern t_CPC CPC;
@@ -83,7 +91,7 @@ dword *ModeMap;
 byte HorzPix[49];
 byte RendBuff[800];
 byte *RendWid, *RendOut;
-dword *RendStart, *RendPos;
+byte *RendStart, *RendPos; // byte*: RendPos is routinely not 4-byte aligned
 
 word MAXlate[0x7400];
 
@@ -818,11 +826,11 @@ void prerender_border()
 {
    dword dwVal = 0x10101010;
    // Global variable privatization
-   dword *pos = RendPos;
-   store_dword(pos++, dwVal);
-   store_dword(pos++, dwVal);
-   store_dword(pos++, dwVal);
-   store_dword(pos++, dwVal);
+   byte *pos = RendPos;
+   store_dword(pos, dwVal); pos += 4;
+   store_dword(pos, dwVal); pos += 4;
+   store_dword(pos, dwVal); pos += 4;
+   store_dword(pos, dwVal); pos += 4;
    RendPos = pos;
 }
 
@@ -832,9 +840,9 @@ void prerender_border_half()
 {
    dword dwVal = 0x10101010;
    // Global variable privatization
-   dword *pos = RendPos;
-   store_dword(pos++, dwVal);
-   store_dword(pos++, dwVal);
+   byte *pos = RendPos;
+   store_dword(pos, dwVal); pos += 4;
+   store_dword(pos, dwVal); pos += 4;
    RendPos = pos;
 }
 
@@ -844,11 +852,11 @@ void prerender_sync()
 {
    dword dwVal = 0x11111111;
    // Global variable privatization
-   dword *pos = RendPos;
-   store_dword(pos++, dwVal);
-   store_dword(pos++, dwVal);
-   store_dword(pos++, dwVal);
-   store_dword(pos++, dwVal);
+   byte *pos = RendPos;
+   store_dword(pos, dwVal); pos += 4;
+   store_dword(pos, dwVal); pos += 4;
+   store_dword(pos, dwVal); pos += 4;
+   store_dword(pos, dwVal); pos += 4;
    RendPos = pos;
 }
 
@@ -858,9 +866,9 @@ void prerender_sync_half()
 {
    dword dwVal = 0x11111111;
    // Global variable privatization
-   dword *pos = RendPos;
-   store_dword(pos++, dwVal);
-   store_dword(pos++, dwVal);
+   byte *pos = RendPos;
+   store_dword(pos, dwVal); pos += 4;
+   store_dword(pos, dwVal); pos += 4;
    RendPos = pos;
 }
 
@@ -894,16 +902,16 @@ void prerender_normal()
    // accessing the global variable twice.
    const byte *ram = pbRAM + CRTC.next_address;
    // Global variable privatization
-   dword *pos = RendPos;
+   byte *pos = RendPos;
    const dword *map = ModeMap;
 
    byte bVidMem = *ram++;
-   store_dword(pos++, map[bVidMem * 2]);
-   store_dword(pos++, map[bVidMem * 2 + 1]);
+   store_dword(pos, map[bVidMem * 2]); pos += 4;
+   store_dword(pos, map[bVidMem * 2 + 1]); pos += 4;
 
    bVidMem = *ram;
-   store_dword(pos++, map[bVidMem * 2]);
-   store_dword(pos++, map[bVidMem * 2 + 1]);
+   store_dword(pos, map[bVidMem * 2]); pos += 4;
+   store_dword(pos, map[bVidMem * 2 + 1]); pos += 4;
 
    RendPos = pos;
 }
@@ -929,17 +937,17 @@ void prerender_normal_plus()
    val3 = *(ModeMap + (bVidMem2 * 2));
    val4 = *(ModeMap + (bVidMem2 * 2) + 1);
    store_dword(RendPos, shiftLittleEndianDwordTriplet(val1, val2, val3, byteShift));
-   store_dword(RendPos + 1, shiftLittleEndianDwordTriplet(val2, val3, val4, byteShift));
+   store_dword(RendPos + 4, shiftLittleEndianDwordTriplet(val2, val3, val4, byteShift));
 
    bVidMem1 = getRAMByte(next_address - byteOffset + 1);
    val1 = *(ModeMap + (bVidMem2 * 2));
    val2 = *(ModeMap + (bVidMem2 * 2) + 1);
    val3 = *(ModeMap + (bVidMem1 * 2));
    val4 = *(ModeMap + (bVidMem1 * 2) + 1);
-   store_dword(RendPos + 2, shiftLittleEndianDwordTriplet(val1, val2, val3, byteShift));
-   store_dword(RendPos + 3, shiftLittleEndianDwordTriplet(val2, val3, val4, byteShift));
+   store_dword(RendPos + 8, shiftLittleEndianDwordTriplet(val1, val2, val3, byteShift));
+   store_dword(RendPos + 12, shiftLittleEndianDwordTriplet(val2, val3, val4, byteShift));
 
-   RendPos += 4;
+   RendPos += 16;
 }
 
 
@@ -950,13 +958,13 @@ void prerender_normal_half()
    // accessing the global variable twice.
    const byte *ram = pbRAM + CRTC.next_address;
    // Global variable privatization
-   dword *pos = RendPos;
+   byte *pos = RendPos;
    const dword *map = ModeMap;
 
    byte bVidMem = *ram++;
-   store_dword(pos++, map[bVidMem]);
+   store_dword(pos, map[bVidMem]); pos += 4;
    bVidMem = *ram;
-   store_dword(pos++, map[bVidMem]);
+   store_dword(pos, map[bVidMem]); pos += 4;
 
    RendPos = pos;
 }
@@ -984,9 +992,9 @@ void prerender_normal_half_plus()
    bVidMem1 = getRAMByte(next_address - byteOffset + 1);
    val1 = *(ModeMap + bVidMem2);
    val2 = *(ModeMap + bVidMem1);
-   store_dword(RendPos + 1, shiftLittleEndianDwordTriplet(0, val1, val2, byteShift));
+   store_dword(RendPos + 4, shiftLittleEndianDwordTriplet(0, val1, val2, byteShift));
 
-   RendPos += 2;
+   RendPos += 8;
 }
 
 
@@ -1314,13 +1322,13 @@ void crtc_cycle(int repeat_count)
             RendPos = RendStart;
             HorzChar--;
          } else {
-            RendPos = reinterpret_cast<dword *>(&RendBuff[val]);
-            int tmp = reinterpret_cast<byte *>(RendStart) - reinterpret_cast<byte *>(RendPos);
+            RendPos = &RendBuff[val];
+            int tmp = RendStart - RendPos;
             HorzPix[48] = static_cast<byte>(tmp);
             HorzPix[0] = HorzPix[1] - static_cast<byte>(tmp);
             HorzMax = 49;
          }
-         RendOut = reinterpret_cast<byte *>(RendStart);
+         RendOut = RendStart;
          RendWid = &HorzPix[0];
          CPC.scr_pos = CPC.scr_base;
          VDU.scrln++;
@@ -1512,7 +1520,7 @@ void crtc_init()
       HorzPix[i] = Wid;
    }
    HorzPix[48] = 0;
-   RendStart = reinterpret_cast<dword *>(&RendBuff[Wid]);
+   RendStart = &RendBuff[Wid];
 }
 
 
@@ -1524,8 +1532,8 @@ void crtc_reset()
    CRTC.registers[2] = 0x2e;
    CRTC.registers[3] = 0x8e;
 
-   RendPos = reinterpret_cast<dword *>(&RendBuff[0]);
-   RendOut = reinterpret_cast<byte *>(RendStart);
+   RendPos = &RendBuff[0];
+   RendOut = RendStart;
    RendWid = &HorzPix[0];
 
    HorzPos = 0x500;
