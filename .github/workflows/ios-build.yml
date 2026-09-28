@@ -471,24 +471,10 @@ jobs:
           # shipping a fork of SDL.
           # ---------------------------------------------------------
 
-          # 1) UIScreen.nativeScale / nativeBounds are iOS 8+. On 7.x use
-          #    [UIScreen scale] and bounds (iPad 1 is non-retina, scale 1).
-          grep -rl "nativeScale\|nativeBounds" src/video/uikit || true
-          sed -i 's/\[UIScreen mainScreen\]\.nativeScale/[UIScreen mainScreen].scale/g' src/video/uikit/*.m src/video/uikit/*.h
-          sed -i 's/uiscreen\.nativeScale/uiscreen.scale/g'                       src/video/uikit/*.m src/video/uikit/*.h
-          sed -i 's/screen\.nativeScale/screen.scale/g'                           src/video/uikit/*.m src/video/uikit/*.h
-          sed -i 's/uiscreen\.nativeBounds/uiscreen.bounds/g'                     src/video/uikit/*.m src/video/uikit/*.h
-          sed -i 's/screen\.nativeBounds/screen.bounds/g'                         src/video/uikit/*.m src/video/uikit/*.h
+          # (No nativeScale/coordinateSpace patching: the CI grep report
+          #  from the first run showed SDL 2.0.9's uikit backend does not
+          #  reference them, so those seds were unnecessary.)
 
-          # 2) UIScreen.coordinateSpace / fixedCoordinateSpace are iOS 8+.
-          grep -rn "coordinateSpace" src/video/uikit || true
-
-          # 3) safeAreaInsets / UIWindowScene etc. are iOS 11+/13+ and are
-          #    already behind @available in 2.0.9 (handled by our
-          #    __isPlatformVersionAtLeast stub, which returns false on 7.1.2).
-
-          # 4) Report anything else that references APIs > iOS 7 so a
-          #    failed run is diagnosable from the log.
           # 3b) SDL_uikitmessagebox.m references UIAlertController (iOS 8+).
           #     Even behind a runtime @available check, the class ref is a
           #     STRONG import -> dyld "Symbol not found" on 7.1.2 before
@@ -498,6 +484,7 @@ jobs:
           printf '%s\n' \
             '#include "../../SDL_internal.h"' \
             '#if SDL_VIDEO_DRIVER_UIKIT' \
+            '#include "SDL_messagebox.h"' \
             '#include "SDL_video.h"' \
             '#include "SDL_uikitmessagebox.h"' \
             'SDL_bool UIKit_ShowingMessageBox(void) { return SDL_FALSE; }' \
