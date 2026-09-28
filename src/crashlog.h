@@ -326,7 +326,25 @@ inline void set_last_pc(unsigned int pc) {
 
 #define CRASH_LOG_STRINGIFY_(x) #x
 #define CRASH_LOG_STRINGIFY(x) CRASH_LOG_STRINGIFY_(x)
+
+// Performance: the hot-path hooks (per Z80 instruction, per CRTC cycle,
+// per OUT port write) cost several string copies / an snprintf each.
+// On an armv7 iPad mini 1 that is a large fraction of the frame budget.
+// They are compiled out by default. Build with -DCAPRICE_CRASHLOG to get
+// the full per-instruction crash trail back when chasing a crash.
+// CRASH_CHECKPOINT (startup/shutdown/rare events, real disk write) stays
+// available in both modes - it is not on the emulation hot path.
+// Rare/startup checkpoint: real disk write, never on the hot path. Always on.
 #define CRASH_CHECKPOINT(msg) ::crashlog::checkpoint(__FILE__ ":" CRASH_LOG_STRINGIFY(__LINE__) " - " msg)
+
+#ifdef CAPRICE_CRASHLOG
 #define CRASH_CHECKPOINT_FAST(msg) ::crashlog::checkpoint_fast(__FILE__ ":" CRASH_LOG_STRINGIFY(__LINE__) " - " msg)
+#define CRASHLOG_FAST(msg) ::crashlog::checkpoint_fast(msg)
+#define CRASHLOG_SET_PC(pc) ::crashlog::set_last_pc(pc)
+#else
+#define CRASH_CHECKPOINT_FAST(msg) ((void)0)
+#define CRASHLOG_FAST(msg) ((void)0)
+#define CRASHLOG_SET_PC(pc) ((void)0)
+#endif
 
 #endif

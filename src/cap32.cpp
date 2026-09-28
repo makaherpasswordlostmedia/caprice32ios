@@ -527,12 +527,14 @@ void z80_OUT_handler (reg_pair port, byte val)
    // concatenates __FILE__ with its argument at compile time, which
    // only works for literals, not this runtime-formatted buffer - call
    // the underlying function directly instead.
+#ifdef CAPRICE_CRASHLOG
    {
       char buf[96];
       snprintf(buf, sizeof(buf), "src/cap32.cpp:z80_OUT_handler port=0x%04x val=0x%02x",
                static_cast<unsigned>(port.w.l), static_cast<unsigned>(val));
       crashlog::checkpoint_fast(buf);
    }
+#endif
    // Amstrad Magnum Phazer
    if ((port.b.h == 0xfb) && (port.b.l == 0xfe)) {
      // When the phazer is not pressed, the CRTC is constantly refreshing R16 & R17:
@@ -3588,10 +3590,8 @@ int cap32_main (int argc, char **argv)
          }
          CPC.scr_pos = CPC.scr_base + dwOffset; // update current rendering position
 
-         if (dwFrameCountOverall < 5) { fprintf(stderr, "TRACE: frame %u before z80_execute\n", dwFrameCountOverall); fflush(stderr); }
          CRASH_CHECKPOINT_FAST("main loop: before z80_execute");
          iExitCondition = z80_execute(); // run the emulation until an exit condition is met
-         if (dwFrameCountOverall < 5) { fprintf(stderr, "TRACE: frame %u after z80_execute, condition=%d\n", dwFrameCountOverall, iExitCondition); fflush(stderr); }
          CRASH_CHECKPOINT_FAST("main loop: after z80_execute");
 
          if (iExitCondition == EC_BREAKPOINT) {
@@ -3621,7 +3621,6 @@ int cap32_main (int argc, char **argv)
          if (iExitCondition == EC_FRAME_COMPLETE) { // emulation finished rendering a complete frame?
             dwFrameCountOverall++;
             dwFrameCount++;
-            if (dwFrameCountOverall < 5) { fprintf(stderr, "TRACE: frame %u EC_FRAME_COMPLETE, before OSD/print\n", dwFrameCountOverall); fflush(stderr); }
             CRASH_CHECKPOINT_FAST("main loop: EC_FRAME_COMPLETE, before OSD/print");
             if (SDL_GetTicks() < osd_timing) {
                print(static_cast<byte *>(back_surface->pixels) + CPC.scr_line_offs, osd_message.c_str(), true);
@@ -3630,13 +3629,10 @@ int cap32_main (int argc, char **argv)
                sprintf(chStr, "%3dFPS %3d%%", static_cast<int>(dwFPS), static_cast<int>(dwFPS) * 100 / (1000 / static_cast<int>(FRAME_PERIOD_MS)));
                print(static_cast<byte *>(back_surface->pixels) + CPC.scr_line_offs, chStr, true); // display the frames per second counter
             }
-            if (dwFrameCountOverall < 5) { fprintf(stderr, "TRACE: frame %u before asic_draw_sprites\n", dwFrameCountOverall); fflush(stderr); }
             CRASH_CHECKPOINT_FAST("main loop: before asic_draw_sprites");
             asic_draw_sprites();
-            if (dwFrameCountOverall < 5) { fprintf(stderr, "TRACE: frame %u before video_display\n", dwFrameCountOverall); fflush(stderr); }
             CRASH_CHECKPOINT_FAST("main loop: before video_display");
             video_display(); // update PC display
-            if (dwFrameCountOverall < 5) { fprintf(stderr, "TRACE: frame %u after video_display\n", dwFrameCountOverall); fflush(stderr); }
             CRASH_CHECKPOINT_FAST("main loop: after video_display");
             if (take_screenshot) {
               dumpScreen();
