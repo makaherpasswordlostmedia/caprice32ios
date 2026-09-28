@@ -1,7 +1,7 @@
-name: Build iOS .ipa (armv7, iOS 9.3)
+name: Build iOS .ipa (armv7, iOS 7.1.2 / iPad 1)
 
 # Cross-compiles Caprice32 (Amstrad CPC emulator, SDL2-based) for 32-bit
-# iOS 9.3 with Theos + clang on ubuntu-latest. No Xcode / no Mac runner
+# iOS 7.x (deployment target 7.0, built against the 9.3 SDK) with Theos + clang on ubuntu-latest. No Xcode / no Mac runner
 # required. Pipeline structure adapted from a Theos-based armv7 CI used
 # for other SDL/UIKit ports targeting the same legacy toolchain.
 #
@@ -48,11 +48,15 @@ on:
   workflow_dispatch: {}
 
 env:
+  # SDK used for headers/frameworks (stubs for linking).
   IOS_SDK_VERSION: "9.3"
+  # Mach-O LC_VERSION_MIN_IPHONEOS. Must be <= the device OS, otherwise
+  # dyld on iOS 7.1.2 refuses to load the binary.
+  IOS_DEPLOY_TARGET: "7.0"
 
 jobs:
   build-ios-armv7:
-    name: Build (Theos / iOS 9.3 / armv7)
+    name: Build (Theos / iOS 7.0+ / armv7)
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -269,7 +273,7 @@ jobs:
           # target 'x86_64-unknown-linux-gnu'" - the compiler was
           # silently defaulting to a host build because none of our
           # flags actually selected an iOS target.)
-          echo "IOS_TARGET_FLAGS=--target=armv7-apple-ios${IOS_SDK_VERSION} -isysroot $THEOS/sdks/iPhoneOS9.3.sdk" >> $GITHUB_ENV
+          echo "IOS_TARGET_FLAGS=--target=armv7-apple-ios${IOS_DEPLOY_TARGET} -isysroot $THEOS/sdks/iPhoneOS9.3.sdk" >> $GITHUB_ENV
 
           # Archiver: prefer llvm-ar bundled next to clang in this
           # toolchain release (standard for L1ghtmann/sbingner-style
@@ -291,10 +295,14 @@ jobs:
           # minutes into the workflow inside a library build.
           echo 'int main(void){return 0;}' > /tmp/target_check.c
           "$THEOS/toolchain/linux/iphone/bin/clang" \
-            --target=armv7-apple-ios${IOS_SDK_VERSION} \
+            --target=armv7-apple-ios${IOS_DEPLOY_TARGET} \
             -isysroot "$THEOS/sdks/iPhoneOS9.3.sdk" \
             -c /tmp/target_check.c -o /tmp/target_check.o
           file /tmp/target_check.o || true
+          # Fail fast if the object doesn't carry the 7.0 deployment target.
+          if command -v otool >/dev/null 2>&1; then
+            otool -l /tmp/target_check.o | grep -A3 -E 'LC_VERSION_MIN|LC_BUILD_VERSION' || true
+          fi
 
       - name: Cross-compile zlib for armv7/iOS
         run: |
@@ -455,6 +463,57 @@ jobs:
           # source of truth instead of two copies drifting apart.
           cp "$GITHUB_WORKSPACE/ios93_compat_shim.h" /tmp/ios93_compat_shim.h
 
+          # ---------------------------------------------------------
+          # iOS 7.x compatibility patches for SDL 2.0.9's UIKit backend.
+          # SDL 2.0.9 targets iOS 8+ in a few places. Each of these is a
+          # HARD crash on 7.1.2 (unrecognized selector / missing class),
+          # not a warning, so patch them at build time instead of
+          # shipping a fork of SDL.
+          # ---------------------------------------------------------
+
+          # 1) UIScreen.nativeScale / nativeBounds are iOS 8+. On 7.x use
+          #    [UIScreen scale] and bounds (iPad 1 is non-retina, scale 1).
+          grep -rl "nativeScale\|nativeBounds" src/video/uikit || true
+          sed -i 's/\[UIScreen mainScreen\]\.nativeScale/[UIScreen mainScreen].scale/g' src/video/uikit/*.m src/video/uikit/*.h
+          sed -i 's/uiscreen\.nativeScale/uiscreen.scale/g'                       src/video/uikit/*.m src/video/uikit/*.h
+          sed -i 's/screen\.nativeScale/screen.scale/g'                           src/video/uikit/*.m src/video/uikit/*.h
+          sed -i 's/uiscreen\.nativeBounds/uiscreen.bounds/g'                     src/video/uikit/*.m src/video/uikit/*.h
+          sed -i 's/screen\.nativeBounds/screen.bounds/g'                         src/video/uikit/*.m src/video/uikit/*.h
+
+          # 2) UIScreen.coordinateSpace / fixedCoordinateSpace are iOS 8+.
+          grep -rn "coordinateSpace" src/video/uikit || true
+
+          # 3) safeAreaInsets / UIWindowScene etc. are iOS 11+/13+ and are
+          #    already behind @available in 2.0.9 (handled by our
+          #    __isPlatformVersionAtLeast stub, which returns false on 7.1.2).
+
+          # 4) Report anything else that references APIs > iOS 7 so a
+          #    failed run is diagnosable from the log.
+          # 3b) SDL_uikitmessagebox.m references UIAlertController (iOS 8+).
+          #     Even behind a runtime @available check, the class ref is a
+          #     STRONG import -> dyld "Symbol not found" on 7.1.2 before
+          #     main() runs. Replace the whole message-box backend with a
+          #     stub that reports "unsupported"; Caprice32 never uses
+          #     SDL_ShowMessageBox (errors go to the log).
+          printf '%s\n' \
+            '#include "../../SDL_internal.h"' \
+            '#if SDL_VIDEO_DRIVER_UIKIT' \
+            '#include "SDL_video.h"' \
+            '#include "SDL_uikitmessagebox.h"' \
+            'SDL_bool UIKit_ShowingMessageBox(void) { return SDL_FALSE; }' \
+            'int UIKit_ShowMessageBox(const SDL_MessageBoxData *messageboxdata, int *buttonid)' \
+            '{' \
+            '    (void)messageboxdata; (void)buttonid;' \
+            '    return SDL_SetError("Message boxes are not supported on this iOS build");' \
+            '}' \
+            '#endif' \
+            > src/video/uikit/SDL_uikitmessagebox.m
+          grep -n "UIKit_ShowingMessageBox\|UIKit_ShowMessageBox" src/video/uikit/SDL_uikitmessagebox.h || true
+
+          echo "---- possible iOS 8+ API references remaining in uikit backend ----"
+          grep -rnE "UIAlertController|UIVisualEffect|traitCollection|preferredContentSize|UIApplicationOpenSettings|isLowPowerModeEnabled|NSProcessInfo.*operatingSystemVersion|UIScreenOverscan|UIWindowScene" src/video/uikit src/main/ios src/core/uikit 2>/dev/null || true
+          echo "-------------------------------------------------------------------"
+
           SRC_DIRS="src src/audio src/audio/coreaudio src/audio/disk src/audio/dummy \
             src/atomic src/cpuinfo src/dynapi src/events src/file src/file/cocoa src/haptic src/haptic/dummy \
             src/joystick src/joystick/iphoneos src/loadso/dlopen src/power src/power/uikit \
@@ -584,6 +643,45 @@ jobs:
           make -f Makefile package FINALPACKAGE=1 SDK_ROOT="$SDK_ROOT" V=1 VERBOSE=1
           ls -la packages
 
+      - name: Verify deployment target of built binary
+        run: |
+          BIN="$(find .theos -type f -name 'Caprice32ARMv7' | head -n1)"
+          echo "Binary: $BIN"
+          file "$BIN" || true
+          TOOLBIN="$THEOS/toolchain/linux/iphone/bin"
+          OTOOL="$(ls "$TOOLBIN"/*otool* "$TOOLBIN"/llvm-objdump 2>/dev/null | head -n1)"
+          echo "Using: $OTOOL"
+          if [ -n "$OTOOL" ]; then
+            case "$OTOOL" in
+              *objdump) "$OTOOL" --macho --private-headers "$BIN" | grep -B1 -A4 -E 'LC_VERSION_MIN|LC_BUILD_VERSION' || true ;;
+              *)        "$OTOOL" -l "$BIN" | grep -A4 -E 'LC_VERSION_MIN|LC_BUILD_VERSION' || true ;;
+            esac
+          fi
+
+      - name: Check binary for symbols missing on iOS 7.1.2
+        run: |
+          # dyld on 7.1.2 aborts at launch with "Symbol not found" if the
+          # binary imports a *strong* symbol that doesn't exist in that
+          # OS. Anything below is iOS 8+ (or newer) API. Report them so a
+          # crash-on-launch is diagnosable from the CI log alone.
+          BIN="$(find .theos -type f -name 'Caprice32ARMv7' | head -n1)"
+          TOOLBIN="$THEOS/toolchain/linux/iphone/bin"
+          NM="$(ls "$TOOLBIN"/llvm-nm "$TOOLBIN"/*-nm 2>/dev/null | head -n1)"
+          [ -z "$NM" ] && NM="$(command -v llvm-nm || command -v nm)"
+          echo "nm: $NM"
+          "$NM" -u "$BIN" > /tmp/undef.txt 2>/dev/null || true
+          echo "undefined symbols total: $(wc -l < /tmp/undef.txt)"
+          echo "---- suspicious (iOS 8+/9+/10+) imports ----"
+          grep -E "UIAlertController|UIAlertAction|UIVisualEffect|UIStackView|UIWindowScene|UIFeedbackGenerator|CHHaptic|MTL|_OBJC_CLASS_\$_(CAMetalLayer|MTL|WKWebView|NSURLSession|UIDocumentPicker|SFSafari|UISelectionFeedback)|_OBJC_CLASS_\$_GCController|__isPlatformVersionAtLeast|nativeScale|safeAreaInsets" /tmp/undef.txt || echo "(none)"
+          echo "---- weak-linked check for GameController ----"
+          grep -E "GameController" /tmp/undef.txt || true
+          # Hard-fail only on classes that definitely don't exist on 7.1.2
+          # AND are not weak. Metal / UIAlertController would be fatal.
+          if grep -E "_OBJC_CLASS_\$_(UIAlertController|MTLCreateSystemDefaultDevice|CAMetalLayer|UIStackView|UIVisualEffectView|UIWindowScene)" /tmp/undef.txt; then
+            echo "::error::Binary strongly imports a class absent on iOS 7.1.2"
+            exit 1
+          fi
+
       - name: Pack .ipa from staged .app
         run: |
           rm -rf ipa_build
@@ -597,13 +695,13 @@ jobs:
           fi
           echo "Using APP_DIR=$APP_DIR"
           cp -a "$APP_DIR" ipa_build/Payload/
-          (cd ipa_build && zip -rq ../packages/Caprice32-${{ steps.commit-info.outputs.hash }}-armv7-iOS9.3.ipa Payload)
+          (cd ipa_build && zip -rq ../packages/Caprice32-${{ steps.commit-info.outputs.hash }}-armv7-iOS7.1.2.ipa Payload)
           ls -la packages
 
       - name: Upload .ipa + .deb artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Caprice32-armv7-iOS9.3-${{ steps.commit-info.outputs.hash }}
+          name: Caprice32-armv7-iOS7.1.2-${{ steps.commit-info.outputs.hash }}
           path: |
             packages/*.ipa
             packages/*.deb
