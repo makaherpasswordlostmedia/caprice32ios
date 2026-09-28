@@ -15,7 +15,7 @@ APPLICATION_NAME = Caprice32ARMv7
 # excluded, so DevTools/showGui/etc. stay real, linkable no-ops instead
 # of needing every call site in cap32.cpp's main loop touched.
 Caprice32ARMv7_FILES = $(filter-out src/gui/%,$(wildcard src/*.cpp src/capsimg/*/*.cpp))
-Caprice32ARMv7_FILES += main_ios.mm AppDelegate.mm ios93_availability_stub.m
+Caprice32ARMv7_FILES += main_ios.mm AppDelegate.mm ios93_availability_stub.m CPCVirtualKeyboard.mm
 
 # SDK_ROOT is passed in from the workflow (see
 # .github/workflows/ios-build.yml, "Stage libs into Theos SDK lib dir").
@@ -53,7 +53,15 @@ ADDITIONAL_CFLAGS += -fno-modules -fno-cxx-modules -fno-implicit-modules -fno-im
 # name+extension in this project instance.
 AppDelegate.mm_CFLAGS += -include $(THEOS_PROJECT_DIR)/ios93_compat_shim.h
 
+# CPCVirtualKeyboard.mm is written for ARC (no manual retain/release, and
+# it keeps its window/controller alive via file-static strong refs).
+# Theos does not enable ARC by default for this target, and without it
+# the overlay would be silently deallocated. Scope ARC to this file only
+# so the rest of the port is left exactly as it was.
+CPCVirtualKeyboard.mm_CFLAGS += -fobjc-arc
+
 Caprice32ARMv7_CFLAGS = \
+	-I. \
 	-Isrc \
 	-Isrc/gui/includes \
 	-Isrc/capsimg/LibIPF -Isrc/capsimg/Device -Isrc/capsimg/CAPSImg \
