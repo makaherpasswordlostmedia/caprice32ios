@@ -1,129 +1,36 @@
-![Caprice32 logo](https://raw.githubusercontent.com/ColinPitrat/caprice32/master/resources/cap32logo.bmp)
-# Caprice32 - Amstrad CPC Emulator
+Caprice32 → iOS 7.1.2 (armv7) port
+Derived from the iOS 9.3 port in this repo. Same emulator core, same Theos/CI pipeline; the deployment target is lowered to iOS 7.0 so the binary loads on 7.1.2.
 
-(c) Copyright 1997-2015 Ulrich Doewich
+Read this first: iPad 1
+Apple shipped iPad 1 (A4, 256 MB RAM) with iOS up to 5.1.1; it never officially ran 7.x. If your iPad 1 is really on 7.1.2 it is a custom-firmware / jailbroken setup, and you should expect:
 
-(c) Copyright 2016-2025 Colin Pitrat
+Install path: fake-signed (ldid) build => needs a jailbreak (.deb via Cydia/dpkg, or the .ipa via AppSync/Installous-style installer). A normal sideload will not work on 7.x.
+Memory: 256 MB total, roughly 100-130 MB usable by an app before jetsam kills it. The emulator core itself is small (a few MB for 128 KB CPC RAM) but SDL2 + GLES textures + ROMs add up; keep ram_size=128 and do not enable 6128+/cartridge modes unless needed.
+Speed: A4 @ 1 GHz, single core, no NEON use in this code. Video is forced to 384x270 (CAPRICE_FAST_VIDEO) and audio to 22.05 kHz (CAPRICE_IOS7). CPC 4 MHz real-time speed should be reachable for most software, but heavy demos may drop frames.
+What changed vs. the 9.3 port
+Area	iOS 9.3 build	iOS 7.1.2 build
+Deployment target	9.3	7.0 (SDK headers still 9.3)
+AppDelegate.mm	UIAlertController, openURL:options:	UIAlertView, openURL:sourceApplication:annotation: (+ 9.x path kept)
+Security-scoped URLs	called directly	respondsToSelector: guarded
+SDL2 2.0.9 UIKit	as-is	nativeScale/nativeBounds -> scale/bounds; message-box backend stubbed (its UIAlertController ref is a strong import => dyld: Symbol not found on 7.x)
+Overlay keyboard	relies on landscape UIScreen.bounds	iOS 7 UIScreen.bounds is always portrait and a 2nd UIWindow is not auto-rotated => rotated by hand from statusBarOrientation
+Toggle buttons	emoji ⌨ 🎮	text KBD / PAD (U+2328 does not exist before iOS 9.1)
+Info.plist	no UIDeviceFamily	UIDeviceFamily=[2] (else iPhone-compat 2x mode on iPad); launch image size {1024,768}; iOS 11-only key removed
+Frameworks	GameController linked	-weak_framework GameController (exists on 7.0+, weak for safety)
+Audio	44.1 kHz	forced 22.05 kHz under -DCAPRICE_IOS7
+Emulator core (src/*.cpp) is untouched except one #ifdef CAPRICE_IOS7 block in loadConfiguration() (audio rate).
 
-https://github.com/ColinPitrat/caprice32
+Build
+Same as before: push to the touchhle branch or run the "Build iOS .ipa (armv7, iOS 7.1.2 / iPad 1)" workflow manually. Artifacts: Caprice32-*-armv7-iOS7.1.2.ipa and .deb.
 
-Linux build: [![Linux build Status](https://github.com/ColinPitrat/caprice32/actions/workflows/linux.yml/badge.svg?branch=master)](https://github.com/ColinPitrat/caprice32/actions/workflows/linux.yml)
+Two new CI steps help diagnose problems without a device:
 
-Windows build: [![Windows build Status](https://github.com/ColinPitrat/caprice32/actions/workflows/windows.yml/badge.svg?branch=latest)](https://github.com/ColinPitrat/caprice32/actions/workflows/windows.yml)
+Verify deployment target prints LC_VERSION_MIN_IPHONEOS; it must say 7.0. If it says 9.3, dyld on 7.1.2 will refuse to launch it.
+Check binary for symbols missing on iOS 7.1.2 lists strong imports of iOS 8+ classes and fails the build on the fatal ones.
+Not verified
+I could not compile or run this here (no iOS toolchain/network in my sandbox), so treat it as "should work, untested on hardware":
 
-MacOS build: [![MacOS build status](https://github.com/ColinPitrat/caprice32/actions/workflows/macos.yml/badge.svg?branch=latest)](https://github.com/ColinPitrat/caprice32/actions/workflows/macos.yml)
-
-# What is it ?
-
-Caprice32 is a software emulator of the Amstrad CPC 8-bit home computer series running on Linux, macOS and Windows. The emulator faithfully imitates the CPC464, CPC664, and CPC6128 models. By recreating the operations of all hardware components at a low level, the emulator achieves a high degree of compatibility with original CPC software. These programs or games can be run unmodified at real-time or higher speeds, depending on the emulator host environment.
-
-# Features
-
-Caprice32 provides:
-  * Complete emulation of CPC464, CPC664 and CPC6128
-  * Mostly working support of Plus Range: CPC464+/CPC6128+/GX4000 (missing vectored & DMA interrupts, analog joysticks and 8 bit printer)
-  * Joystick support - it can be fully used with joystick only, thanks to an integrated virtual keyboard.
-  * Joystick emulation - joystick-only games can be played using the keyboard
-  * English, French or Spanish keyboards
-  * DSK, [IPF](http://softpres.org/glossary:ipf) and CT-RAW files for disks - VOC and CDT files for tapes - CPR files for cartridge
-  * Snapshots (SNA files)
-  * Direct load of ZIP files
-  * Developers' tools with debugger, memory editor, disassembler...
-  * Custom disk formats
-  * Printer support
-  * Experimental support of Multiface 2 (you should prefer using memory tool)
-  * [Net4CPC](doc/net4cpc.md) (W5100S Ethernet) emulation — TCP and UDP sockets backed by host POSIX sockets
-
-You see something missing ? Do not hesitate to open an issue to suggest it.
-
-# Installation
-
-## macOS
-
-See the [INSTALL.md](INSTALL.md)
-
-## Linux
-
-### Debug behavior and release behavior when locating configuration file
-
-If you compile Caprice32 yourself with plain make, behavior is
-debug-oriented.  By default at run-time it will look for `cap32.cfg`
-in the *current directory of the process* that launches it, not in the
-executable location as stated in the documentation.  To get the
-documented behavior, use `APP_PATH` like in the examples below.
-
-### From Git
-
-```
-git clone https://github.com/ColinPitrat/caprice32.git
-cd caprice32
-make APP_PATH="$PWD"
-./cap32
-```
-
-### From releases
-
-Download a release from https://github.com/ColinPitrat/caprice32/releases.
-Decompress it and then from a terminal in the resulting directory:
-
-```
-make APP_PATH="$PWD"
-./cap32
-```
-
-### Snap
-
-A SNAP (maintained by a third party) is available at https://snapcraft.io/caprice32.
-
-## Windows
-
-Download a release from https://github.com/ColinPitrat/caprice32/releases.
-Decompress it and double click on cap32.exe
-
-# Basic usage
-
-See the [manual page](http://htmlpreview.github.io/?https://github.com/ColinPitrat/caprice32/blob/master/doc/man.html) for more details. If you are really lost, you can simply invoke the emulator without any argument, then press F1 to get the in-emulator menu.
-
-# Help needed
-
-Maintaining Caprice is a lot of work and you can help with it.
-You can:
-  * Use it, show it, talk and write about it
-  * Thank the maintainer
-  * Report any bug or missing feature
-  * Write some documentation
-  * Package it for your favourite distribution (if not yet available)
-  * Port it to iOS so that Mac users can enjoy it too
-
-# Supporting
-
-You can support me on Liberapay:
-
-[<img alt="Donate using Liberapay" src="https://liberapay.com/assets/widgets/donate.svg">](https://liberapay.com/ColinPitrat/donate)
-
-# Building and compiling
-
-See the [INSTALL.md](INSTALL.md) files for Caprice32 build instructions.
-
-# Using the source
-
-The source for Caprice32 is distributed under the terms of the GNU General Public License version 2 (GPLv2), which is included in this archive as COPYING.txt. Please make sure that you understand the terms and conditions of the license before using the source.
-
-The screen dump part of Caprice32 uses [driedfruit SDL_SavePNG](https://github.com/driedfruit/SDL_SavePNG) code, released under zlib/libpng license, which is compatible with GPLv2.
-
-I encourage you to get involved in the project.
-
-# Comments or ready to contribute?
-
-If you have suggestions, a bug report or even want to participate to the development, please feel free to open an issue or submit a pull request.
-
-# Why another GitHub repository ?
-
-There are many repositories for caprice32 on GitHub:
-
-  * https://github.com/burzumishi/caprice32
-  * https://github.com/rofl0r/caprice32
-  * https://github.com/MrZammler/caprice32
-  * https://github.com/burzumishi/caprice32wx
-
-So why create another one ? All these repositories are highly inactive. The ones that touched the code added dependencies (wxWidget, GTK) without really adding features.
+SDL2 sed patches assume the 2.0.9 source layout; the CI log prints what remains referencing iOS 8+ APIs (possible iOS 8+ API references) so any leftover is visible at once.
+The manual overlay rotation is written from iOS 7 UIKit behaviour, not observed on a device. If the on-screen keyboard appears sideways or upside-down, flip LandscapeTransform() in CPCVirtualKeyboard.mm (swap the M_PI_2 / -M_PI_2 cases).
+GLES2 on the A4 (SGX535) works but is slow; if the picture is black, add SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengles") (GLES1) in cap32.cpp next to the existing hint.
+You still need your own CPC ROMs in rom/ (copyrighted, see README_PORT.md).
