@@ -381,12 +381,16 @@ void z80_write_mem(word addr, byte val) {
 #define z80_wait_states \
 { \
    if (iCycleCount) { \
+      crashlog::checkpoint_fast("z80.cpp:wait_states: before crtc_cycle"); \
       crtc_cycle(iCycleCount >> 2); \
+      crashlog::checkpoint_fast("z80.cpp:wait_states: after crtc_cycle"); \
       if (CPC.snd_enabled) { \
          PSG.cycle_count.high += iCycleCount; \
          if (PSG.cycle_count.high >= CPC.snd_cycle_count_init.high) { \
             PSG.set_cycle_count_both(PSG.cycle_count_both() - CPC.snd_cycle_count_init_both()); \
+            crashlog::checkpoint_fast("z80.cpp:wait_states: before PSG.Synthesizer"); \
             PSG.Synthesizer(); \
+            crashlog::checkpoint_fast("z80.cpp:wait_states: after PSG.Synthesizer"); \
          } \
       } \
       if (FDC.phase == EXEC_PHASE) { \
@@ -948,6 +952,7 @@ inline byte SRL(byte val) {
 { \
    /*LOG_DEBUG("Interrupt handler " << static_cast<int>(_IFF1));*/ \
    if (_IFF1) { /* process interrupts? */ \
+      crashlog::checkpoint_fast("z80.cpp:int_handler: taking interrupt"); \
       _R++; \
       _IFF1 = _IFF2 = 0; /* clear interrupt flip-flops */ \
       z80.int_pending = 0; \
@@ -1067,6 +1072,7 @@ int z80_execute()
          }
       }
 
+      crashlog::checkpoint_fast("z80.cpp:z80_execute: before instruction");
       z80_execute_instruction();
       // Second, distinct marker recorded right after the instruction
       // completes. If a crash's "last checkpoint" is an OUT/IN port

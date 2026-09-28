@@ -1198,8 +1198,11 @@ void crtc_cycle(int repeat_count)
             if (flags1.combined != LastPreRend) {
                set_prerender(); // change pre-renderer if necessary
             }
+            CRASH_CHECKPOINT_FAST("crtc_cycle: before PreRender");
             PreRender(); // translate CPC video memory bytes to entries referencing the palette
+            CRASH_CHECKPOINT_FAST("crtc_cycle: before scr_render");
             CPC.scr_render(); // render to the video surface at the current bit depth
+            CRASH_CHECKPOINT_FAST("crtc_cycle: after scr_render");
          }
       }
       // https://www.cpcwiki.eu/index.php/Amstrad_Magnum_Phaser#Technical
