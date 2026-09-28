@@ -132,19 +132,43 @@ static void SeedWritableSupportFilesIfNeeded(NSString *documentsPath)
     }
 }
 
-// Redirect stdout/stderr to a file in Documents. On-device (Springboard)
-// launches have no attached console - anything written to stderr/stdout
-// (all of LOG_ERROR/LOG_WARNING/LOG_INFO and every fprintf(stderr,...) in
-// cap32.cpp) simply vanishes, which is why crashes here produce no visible
-// logs at all. freopen makes those same streams land in a real file.
+// stdout/stderr handling.
+//
+// On-device (Springboard) launches have no attached console, so anything
+// written to stderr/stdout is lost. Redirecting it to a file in Documents
+// makes it visible - but it is EXPENSIVE: every LOG_* / fprintf(stderr)
+// becomes an unbuffered write() to flash, and the file grows forever. On
+// an iPad mini 1 (armv7, A5) that alone is enough to wreck the frame rate.
+//
+// So by default the streams are pointed at /dev/null (cheap, and keeps
+// std::cerr/std::cout from ever touching the disk). To get the file log
+// back for debugging, either build with -DCAPRICE_FILE_LOG, or create an
+// empty file named "enable_log" in the app's Documents folder.
 static void RedirectStdioToDocuments(NSString *documentsPath)
 {
     NSString *logPath = [documentsPath stringByAppendingPathComponent:@"caprice32.log"];
-    freopen(logPath.UTF8String, "a", stdout);
-    freopen(logPath.UTF8String, "a", stderr);
-    setvbuf(stdout, nullptr, _IONBF, 0);
-    setvbuf(stderr, nullptr, _IONBF, 0);
-    NSLog(@"Caprice32: logging to %@", logPath);
+    NSString *flagPath = [documentsPath stringByAppendingPathComponent:@"enable_log"];
+
+    BOOL wantFileLog = NO;
+#ifdef CAPRICE_FILE_LOG
+    wantFileLog = YES;
+#endif
+    if ([[NSFileManager defaultManager] fileExistsAtPath:flagPath]) {
+        wantFileLog = YES;
+    }
+
+    if (wantFileLog) {
+        // Truncate ("w") so the log does not grow across runs, and leave
+        // the streams fully buffered - no _IONBF.
+        freopen(logPath.UTF8String, "w", stdout);
+        freopen(logPath.UTF8String, "a", stderr);
+        setvbuf(stdout, nullptr, _IOFBF, 1 << 16);
+        setvbuf(stderr, nullptr, _IOLBF, 1 << 12);
+        NSLog(@"Caprice32: logging to %@", logPath);
+    } else {
+        freopen("/dev/null", "w", stdout);
+        freopen("/dev/null", "w", stderr);
+    }
 }
 
 int main(int argc, char *argv[])
