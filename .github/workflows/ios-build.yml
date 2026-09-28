@@ -25,6 +25,11 @@ on:
       - "roms/**"
       - "control"
       - "entitlements.plist"
+      - "Makefile"
+      - "*.mm"
+      - "*.m"
+      - "*.h"
+      - "Resources/**"
       - ".github/workflows/ios-build.yml"
   pull_request:
     branches: [main]
@@ -34,6 +39,11 @@ on:
       - "roms/**"
       - "control"
       - "entitlements.plist"
+      - "Makefile"
+      - "*.mm"
+      - "*.m"
+      - "*.h"
+      - "Resources/**"
       - ".github/workflows/ios-build.yml"
   workflow_dispatch: {}
 
