@@ -2108,6 +2108,15 @@ void loadConfiguration (t_CPC &CPC, const std::string& configFilename)
       CPC.snd_volume = 80;
    }
    CPC.snd_pp_device = conf.getIntValue("sound", "pp_device", 0) & 1;
+#ifdef CAPRICE_IOS7
+   // iPad 1 (A4, 1 GHz single core, 256 MB RAM): mixing PSG at 44.1 kHz
+   // costs ~2x the CPU of 22.05 kHz for no audible gain on a 3" speaker.
+   // Forced here (like CAPRICE_FAST_VIDEO above) because an already-seeded
+   // ~/.cap32.cfg would otherwise keep the old value.
+   // playback_rate index: 0=11025 1=22050 2=44100 3=48000 4=96000
+   CPC.snd_playback_rate = 1;
+   CPC.snd_bits = 1;   // 16-bit: CoreAudio on iOS 7 wants S16 anyway
+#endif
 
    CPC.kbd_layout = conf.getStringValue("control", "kbd_layout", "keymap_us.map");
 
