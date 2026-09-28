@@ -604,9 +604,17 @@ static const NSInteger kRowCount = 6;
 
 @end
 
-// The app is landscape-only (Info.plist). On iOS 8+ UIScreen.bounds is
-// orientation-dependent, but a window created before the first rotation
-// pass may still see portrait dimensions. Normalize to landscape.
+// The app is landscape-only (Info.plist).
+//
+// iOS 7 vs iOS 8+ difference that matters here:
+//   - iOS 8+: UIScreen.bounds follows the interface orientation, and a
+//     UIWindow's content is rotated for you.
+//   - iOS 7.x (this build's target): UIScreen.bounds is ALWAYS portrait
+//     (768x1024 on iPad), and a secondary UIWindow is NOT auto-rotated.
+//     Its view hierarchy stays in portrait coordinates unless we apply
+//     the rotation transform ourselves.
+// So: the window keeps the portrait screen bounds and we rotate its root
+// view by hand according to the status-bar orientation.
 static CGRect LandscapeScreenBounds(void)
 {
     CGRect b = [UIScreen mainScreen].bounds;
@@ -614,6 +622,24 @@ static CGRect LandscapeScreenBounds(void)
         b = CGRectMake(0, 0, b.size.height, b.size.width);
     }
     return b;
+}
+
+static BOOL NeedsManualRotation(void)
+{
+    // iOS 8+ already hands landscape bounds to the window.
+    CGRect b = [UIScreen mainScreen].bounds;
+    return b.size.width < b.size.height;
+}
+
+static CGAffineTransform LandscapeTransform(void)
+{
+    switch ([UIApplication sharedApplication].statusBarOrientation) {
+        case UIInterfaceOrientationLandscapeLeft:
+            return CGAffineTransformMakeRotation((CGFloat)(-M_PI_2));
+        case UIInterfaceOrientationLandscapeRight:
+        default:
+            return CGAffineTransformMakeRotation((CGFloat)(M_PI_2));
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -650,12 +676,36 @@ static CGRect LandscapeScreenBounds(void)
     return UIInterfaceOrientationMaskLandscape;
 }
 
+// iOS 5/6-style rotation query (still consulted on some 7.x paths).
+- (BOOL)shouldAutorotateToInterfaceOrientation:(UIInterfaceOrientation)o
+{
+    return UIInterfaceOrientationIsLandscape(o);
+}
+
+- (void)caprice_orientationChanged:(NSNotification *)n
+{
+    [self.view setNeedsLayout];
+    [self viewDidLayoutSubviews];
+}
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    [[NSNotificationCenter defaultCenter]
+        addObserver:self
+           selector:@selector(caprice_orientationChanged:)
+               name:UIApplicationDidChangeStatusBarOrientationNotification
+             object:nil];
+}
+
 - (void)loadView
 {
     UIView *root = [[UIView alloc] initWithFrame:LandscapeScreenBounds()];
     root.backgroundColor = [UIColor clearColor];
     root.opaque = NO;
-    root.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    if (!NeedsManualRotation()) {
+        root.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    }
     self.view = root;
 
     _panel = [[CPCKeyboardPanel alloc] initWithFrame:CGRectZero];
@@ -663,8 +713,9 @@ static CGRect LandscapeScreenBounds(void)
     [root addSubview:_panel];
 
     _toggle = [UIButton buttonWithType:UIButtonTypeCustom];
-    [_toggle setTitle:@"⌨" forState:UIControlStateNormal];
-    _toggle.titleLabel.font = [UIFont systemFontOfSize:26];
+    [_toggle setTitle:@"KBD" forState:UIControlStateNormal];
+    [_toggle setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    _toggle.titleLabel.font = [UIFont boldSystemFontOfSize:14];
     _toggle.backgroundColor = [UIColor colorWithWhite:0.05 alpha:0.60];
     _toggle.layer.cornerRadius = 8.0;
     [_toggle addTarget:self action:@selector(toggleTapped)
@@ -677,8 +728,9 @@ static CGRect LandscapeScreenBounds(void)
     [root addSubview:_pad];
 
     _gameToggle = [UIButton buttonWithType:UIButtonTypeCustom];
-    [_gameToggle setTitle:@"🎮" forState:UIControlStateNormal];
-    _gameToggle.titleLabel.font = [UIFont systemFontOfSize:24];
+    [_gameToggle setTitle:@"PAD" forState:UIControlStateNormal];
+    [_gameToggle setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    _gameToggle.titleLabel.font = [UIFont boldSystemFontOfSize:14];
     _gameToggle.backgroundColor = [UIColor colorWithWhite:0.05 alpha:0.60];
     _gameToggle.layer.cornerRadius = 8.0;
     [_gameToggle addTarget:self action:@selector(gameToggleTapped)
@@ -689,7 +741,19 @@ static CGRect LandscapeScreenBounds(void)
 - (void)viewDidLayoutSubviews
 {
     [super viewDidLayoutSubviews];
-    CGRect b = self.view.bounds;
+    CGRect b = CGRectMake(0, 0, 0, 0);
+    if (NeedsManualRotation()) {
+        b = LandscapeScreenBounds();
+        // Rotate the landscape-sized root view into place on the
+        // portrait window: set bounds/center/transform explicitly.
+        CGRect scr = [UIScreen mainScreen].bounds;
+        self.view.transform = CGAffineTransformIdentity;
+        self.view.bounds = CGRectMake(0, 0, b.size.width, b.size.height);
+        self.view.center = CGPointMake(scr.size.width * 0.5f, scr.size.height * 0.5f);
+        self.view.transform = LandscapeTransform();
+    } else {
+        b = self.view.bounds;
+    }
 
     // Panel takes the lower ~45% of the screen. On iPad mini 1 landscape
     // (1024x768) that is ~345 pt tall, which leaves the top ~55% for the
@@ -751,7 +815,7 @@ static CPCOverlayVC *sVC;
     if (sWindow) return;
 
     CPCOverlayWindow *w = [[CPCOverlayWindow alloc]
-                              initWithFrame:LandscapeScreenBounds()];
+                              initWithFrame:[UIScreen mainScreen].bounds];
     sVC = [CPCOverlayVC new];
     w.rootViewController = sVC;
     w.backgroundColor = [UIColor clearColor];

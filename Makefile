@@ -1,6 +1,10 @@
 export THEOS_DEVICE_IP =
 ARCHS = armv7
-TARGET = iphone:clang:9.3:9.3
+# SDK headers/libs: iPhoneOS 9.3 (newest SDK with armv7 slices we have).
+# Deployment target: 7.0 -> Mach-O gets LC_VERSION_MIN_IPHONEOS 7.0, so
+# iOS 7.1.2 (iPad 1 is NOT officially supported on 7.x - this is for
+# jailbroken/custom-firmware setups) will accept and load the binary.
+TARGET = iphone:clang:9.3:7.0
 INSTALL_TARGET_PROCESSES = Caprice32ARMv7
 
 include $(THEOS)/makefiles/common.mk
@@ -71,7 +75,7 @@ Caprice32ARMv7_CFLAGS = \
 	-I$(SDK_ROOT)/usr/include/freetype2 \
 	-fno-modules -fno-cxx-modules -fno-implicit-modules -fno-implicit-module-maps \
 	-DNDEBUG -DCAPRICE_NO_WGUI \
-	-DCAPRICE_NO_LOG -DCAPRICE_FORCE_KEY_JOYSTICK -DCAPRICE_FAST_VIDEO
+	-DCAPRICE_NO_LOG -DCAPRICE_FORCE_KEY_JOYSTICK -DCAPRICE_FAST_VIDEO -DCAPRICE_IOS7
 
 # Debug switches (all OFF by default for speed on iPad mini 1 / armv7):
 #   -UCAPRICE_NO_LOG      re-enable LOG_ERROR/WARNING/INFO/VERBOSE
@@ -92,6 +96,8 @@ Caprice32ARMv7_CXXFLAGS = $(Caprice32ARMv7_CFLAGS) -std=gnu++17
 # link it from) - see that file for details. No extra linker flag
 # needed here; it's just another translation unit in FILES above.
 Caprice32ARMv7_LDFLAGS = \
+	-Wl,-U,_OBJC_CLASS_$$_UIAlertController \
+	-Wl,-U,_OBJC_CLASS_$$_GCController \
 	-L$(SDK_ROOT)/usr/lib \
 	-lSDL2 -lfreetype -lpng16 -lz \
 	-framework UIKit \
@@ -101,7 +107,7 @@ Caprice32ARMv7_LDFLAGS = \
 	-framework CoreAudio \
 	-framework AudioToolbox \
 	-framework AVFoundation \
-	-framework GameController \
+	-weak_framework GameController \
 	-framework CoreMotion \
 	-framework OpenGLES
 

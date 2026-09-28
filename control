@@ -2,8 +2,8 @@ Package: com.example.caprice32ios
 Name: Caprice32
 Version: 4.6.0-1
 Architecture: iphoneos-arm
-Description: Amstrad CPC Emulator (armv7 / iOS 9.3 port)
+Description: Amstrad CPC Emulator (armv7 / iOS 7.1.2 port)
 Maintainer: You
 Author: Ulrich Doewich, Colin Pitrat, and contributors (upstream); iOS port by you
 Section: Games
-Depends: firmware (>= 9.3)
+Depends: firmware (>= 7.0)
