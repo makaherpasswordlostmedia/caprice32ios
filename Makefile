@@ -71,11 +71,12 @@ Caprice32ARMv7_CFLAGS = \
 	-I$(SDK_ROOT)/usr/include/freetype2 \
 	-fno-modules -fno-cxx-modules -fno-implicit-modules -fno-implicit-module-maps \
 	-DNDEBUG -DCAPRICE_NO_WGUI \
-	-DCAPRICE_NO_LOG
+	-DCAPRICE_NO_LOG -DCAPRICE_FORCE_KEY_JOYSTICK -DCAPRICE_FAST_VIDEO
 
 # Debug switches (all OFF by default for speed on iPad mini 1 / armv7):
 #   -UCAPRICE_NO_LOG      re-enable LOG_ERROR/WARNING/INFO/VERBOSE
 #   -DCAPRICE_CRASHLOG    per-instruction crash trail (slow!)
+#   -UCAPRICE_FAST_VIDEO  back to 2x2 "Double size" rendering (slower, sharper)
 #   -DCAPRICE_FILE_LOG    always write stdout/stderr to Documents/caprice32.log
 #                         (or just drop an empty 'enable_log' file in Documents)
 

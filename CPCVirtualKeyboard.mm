@@ -460,6 +460,150 @@ static const NSInteger kRowCount = 6;
 
 @end
 
+
+// ---------------------------------------------------------------------
+// Game pad: D-pad + fire buttons with real HOLD and multi-touch.
+// The normal keyboard keys only "tap" (45 ms), which is right for BASIC
+// but makes it impossible to walk/shoot in a game. Here a key goes DOWN
+// when a finger lands on the pad zone and UP when it leaves/lifts, so
+// you can hold a direction and fire at the same time.
+//
+// Keys sent are the arrows + Z / X. With joystick_emulation=1 (see
+// cap32.cfg) the core maps exactly those host keys to CPC joystick 0
+// (up/down/left/right, fire1, fire2), which is what the game reads.
+// ---------------------------------------------------------------------
+@interface CPCGamePad : UIView
+@end
+
+@implementation CPCGamePad {
+    // One entry per virtual pad key: label view + frame + keycode + held?
+    NSArray<UILabel *> *_labels;
+    SDL_Keycode _syms[6];       // L R U D  Z X
+    BOOL _held[6];
+    // touch -> bitmask of keys it currently holds
+    NSMapTable<UITouch *, NSNumber *> *_touchKeys;
+}
+
+- (instancetype)initWithFrame:(CGRect)frame
+{
+    if ((self = [super initWithFrame:frame])) {
+        self.multipleTouchEnabled = YES;
+        self.exclusiveTouch = NO;
+        self.backgroundColor = [UIColor clearColor];
+        _syms[0] = SDLK_LEFT;  _syms[1] = SDLK_RIGHT;
+        _syms[2] = SDLK_UP;    _syms[3] = SDLK_DOWN;
+        _syms[4] = SDLK_z;     _syms[5] = SDLK_x;
+        NSArray *titles = @[ @"◀", @"▶", @"▲", @"▼", @"A", @"B" ];
+        NSMutableArray *ls = [NSMutableArray array];
+        for (NSString *t in titles) {
+            UILabel *l = [UILabel new];
+            l.text = t;
+            l.textAlignment = NSTextAlignmentCenter;
+            l.textColor = [UIColor whiteColor];
+            l.font = [UIFont boldSystemFontOfSize:30];
+            l.backgroundColor = [UIColor colorWithWhite:0.05 alpha:0.55];
+            l.layer.cornerRadius = 12.0;
+            l.layer.masksToBounds = YES;
+            l.layer.borderWidth = 1.0;
+            l.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.35].CGColor;
+            l.userInteractionEnabled = NO;
+            [self addSubview:l];
+            [ls addObject:l];
+        }
+        _labels = ls;
+        _touchKeys = [NSMapTable weakToStrongObjectsMapTable];
+    }
+    return self;
+}
+
+// Geometry: D-pad bottom-left, A/B bottom-right. Returns rect for key i.
+- (CGRect)rectForKey:(NSInteger)i
+{
+    CGRect b = self.bounds;
+    CGFloat u = MIN(b.size.height * 0.32, 110.0);     // button size
+    CGFloat m = 24.0;                                  // screen margin
+    CGFloat cx = m + u * 1.5;                          // d-pad centre x
+    CGFloat cy = b.size.height - m - u * 1.5;          // d-pad centre y
+    switch (i) {
+        case 0: return CGRectMake(cx - u * 1.5, cy - u * 0.5, u, u);   // left
+        case 1: return CGRectMake(cx + u * 0.5, cy - u * 0.5, u, u);   // right
+        case 2: return CGRectMake(cx - u * 0.5, cy - u * 1.5, u, u);   // up
+        case 3: return CGRectMake(cx - u * 0.5, cy + u * 0.5, u, u);   // down
+        case 4: return CGRectMake(b.size.width - m - u * 2.2, b.size.height - m - u * 1.4, u * 1.1, u * 1.1); // A (Z)
+        default:return CGRectMake(b.size.width - m - u * 1.1, b.size.height - m - u * 2.2, u * 1.1, u * 1.1); // B (X)
+    }
+}
+
+- (void)layoutSubviews
+{
+    [super layoutSubviews];
+    for (NSInteger i = 0; i < 6; i++) _labels[i].frame = [self rectForKey:i];
+}
+
+// Only claim touches that land on an actual pad button (expanded a bit
+// so a fat thumb still hits); everything else falls through to the
+// keyboard / emulator underneath.
+- (NSInteger)keyIndexAtPoint:(CGPoint)pt
+{
+    for (NSInteger i = 0; i < 6; i++) {
+        if (CGRectContainsPoint(CGRectInset([self rectForKey:i], -10, -10), pt)) return i;
+    }
+    return -1;
+}
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event
+{
+    if (self.hidden || [self keyIndexAtPoint:point] < 0) return nil;
+    return self;
+}
+
+- (void)setKey:(NSInteger)i down:(BOOL)down
+{
+    if (_held[i] == down) return;
+    _held[i] = down;
+    PushKey(_syms[i], 0, down);
+    _labels[i].backgroundColor = down
+        ? [UIColor colorWithRed:0.20 green:0.50 blue:0.85 alpha:0.85]
+        : [UIColor colorWithWhite:0.05 alpha:0.55];
+}
+
+// Recompute which keys are held from all active touches (handles a
+// finger sliding from LEFT to UP without lifting, plus several fingers).
+- (void)refreshHeld
+{
+    BOOL want[6] = { NO, NO, NO, NO, NO, NO };
+    for (UITouch *t in _touchKeys.keyEnumerator) {
+        NSInteger i = [self keyIndexAtPoint:[t locationInView:self]];
+        if (i >= 0) want[i] = YES;
+    }
+    for (NSInteger i = 0; i < 6; i++) [self setKey:i down:want[i]];
+}
+
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event
+{
+    for (UITouch *t in touches) [_touchKeys setObject:@1 forKey:t];
+    [self refreshHeld];
+}
+- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event
+{
+    [self refreshHeld];
+}
+- (void)endTouches:(NSSet<UITouch *> *)touches
+{
+    for (UITouch *t in touches) [_touchKeys removeObjectForKey:t];
+    [self refreshHeld];
+}
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event { [self endTouches:touches]; }
+- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event { [self endTouches:touches]; }
+
+// Release everything (used when the pad gets hidden mid-press).
+- (void)releaseAll
+{
+    [_touchKeys removeAllObjects];
+    for (NSInteger i = 0; i < 6; i++) [self setKey:i down:NO];
+}
+
+@end
+
 // The app is landscape-only (Info.plist). On iOS 8+ UIScreen.bounds is
 // orientation-dependent, but a window created before the first rotation
 // pass may still see portrait dimensions. Normalize to landscape.
@@ -490,8 +634,11 @@ static CGRect LandscapeScreenBounds(void)
 
 @interface CPCOverlayVC : UIViewController
 @property (nonatomic, strong) CPCKeyboardPanel *panel;
+@property (nonatomic, strong) CPCGamePad *pad;
 @property (nonatomic, strong) UIButton *toggle;
+@property (nonatomic, strong) UIButton *gameToggle;
 @property (nonatomic, assign) BOOL kbVisible;
+@property (nonatomic, assign) BOOL padVisible;
 @end
 
 @implementation CPCOverlayVC
@@ -523,6 +670,20 @@ static CGRect LandscapeScreenBounds(void)
     [_toggle addTarget:self action:@selector(toggleTapped)
       forControlEvents:UIControlEventTouchUpInside];
     [root addSubview:_toggle];
+
+    // Game pad (D-pad + A/B with real hold) - hidden until 🎮 is tapped.
+    _pad = [[CPCGamePad alloc] initWithFrame:CGRectZero];
+    _pad.hidden = YES;
+    [root addSubview:_pad];
+
+    _gameToggle = [UIButton buttonWithType:UIButtonTypeCustom];
+    [_gameToggle setTitle:@"🎮" forState:UIControlStateNormal];
+    _gameToggle.titleLabel.font = [UIFont systemFontOfSize:24];
+    _gameToggle.backgroundColor = [UIColor colorWithWhite:0.05 alpha:0.60];
+    _gameToggle.layer.cornerRadius = 8.0;
+    [_gameToggle addTarget:self action:@selector(gameToggleTapped)
+          forControlEvents:UIControlEventTouchUpInside];
+    [root addSubview:_gameToggle];
 }
 
 - (void)viewDidLayoutSubviews
@@ -538,6 +699,23 @@ static CGRect LandscapeScreenBounds(void)
 
     // Toggle sits top-right, tucked out of the CPC picture's way.
     _toggle.frame = CGRectMake(b.size.width - 54, 8, 46, 40);
+    _gameToggle.frame = CGRectMake(b.size.width - 108, 8, 46, 40);
+    _pad.frame = b;   // pad only claims touches on its own buttons
+}
+
+- (void)gameToggleTapped
+{
+    [self setPadVisible:!_padVisible];
+}
+
+- (void)setPadVisible:(BOOL)visible
+{
+    _padVisible = visible;
+    if (!visible) [_pad releaseAll];
+    _pad.hidden = !visible;
+    _gameToggle.backgroundColor = visible
+        ? [UIColor colorWithRed:0.20 green:0.50 blue:0.85 alpha:0.80]
+        : [UIColor colorWithWhite:0.05 alpha:0.60];
 }
 
 - (void)toggleTapped
