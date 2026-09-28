@@ -2034,6 +2034,12 @@ void loadConfiguration (t_CPC &CPC, const std::string& configFilename)
       CPC.keyboard = 0;
    }
    CPC.joystick_emulation = static_cast<JoystickEmulation>(conf.getIntValue("system", "joystick_emulation", 0));
+#ifdef CAPRICE_FORCE_KEY_JOYSTICK
+   // iOS: there is no host joystick, and the on-screen game pad sends
+   // arrows + Z/X. Force keyboard->joystick emulation regardless of what an
+   // old, already-seeded ~/.cap32.cfg says, so games read it as joystick 0.
+   CPC.joystick_emulation = JoystickEmulation::Keyboard;
+#endif
    CPC.joysticks = conf.getIntValue("system", "joysticks", 1) & 1;
    // Both fields are unsigned int (cap32.h). getIntValue()-1 on a config
    // value of 0 (a hand-edited/corrupt cap32.cfg, or any future caller
@@ -2061,6 +2067,17 @@ void loadConfiguration (t_CPC &CPC, const std::string& configFilename)
       CPC.scr_style = DEFAULT_VIDEO_PLUGIN;
       LOG_ERROR("Unsupported video plugin specified - defaulting to plugin " << video_plugin_list[DEFAULT_VIDEO_PLUGIN].name);
    }
+#ifdef CAPRICE_FAST_VIDEO
+   // iPad mini 1 (A5, armv7, no NEON): render the CPC picture at its native
+   // 384x270 ("Half size with hardware flip") and let the GPU stretch it to
+   // the panel. The 2x2 "Double size" modes push 4x the pixels through
+   // PreRender + scr_render and 4x the bytes through SDL_UpdateTexture every
+   // frame; the on-screen result is identical (both end up as 1024x720),
+   // only slightly softer. Forced here because an already-seeded
+   // ~/.cap32.cfg would otherwise keep the old scr_style/scr_scale.
+   CPC.scr_scale = 1;
+   CPC.scr_style = 0;
+#endif
    CPC.scr_oglfilter = conf.getIntValue("video", "scr_oglfilter", 1) & 1;
    CPC.scr_oglscanlines = conf.getIntValue("video", "scr_oglscanlines", 30);
    if (CPC.scr_oglscanlines > 100) {
