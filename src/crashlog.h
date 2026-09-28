@@ -308,10 +308,26 @@ inline const char *path() {
 // added to fix. Call this once at the top of any thread's entry
 // function that isn't the one that called init().
 inline void register_thread_altstack() {
-   static thread_local unsigned char altstack[detail::kAltStackSize];
+   // C++ thread_local is NOT supported by clang when targeting iOS < 8
+   // ("thread-local storage is not supported for the current target"),
+   // so this uses a pthread key instead. Same behaviour: one alt-stack
+   // per calling thread, allocated on first use, freed when the thread
+   // exits (key destructor).
+   static pthread_key_t key;
+   static pthread_once_t once = PTHREAD_ONCE_INIT;
+   pthread_once(&once, []() { pthread_key_create(&key, [](void *p) { free(p); }); });
+
+   if (pthread_getspecific(key) != nullptr) {
+      return;  // this thread already registered one
+   }
+   void *mem = malloc(detail::kAltStackSize);
+   if (mem == nullptr) {
+      return;
+   }
+   pthread_setspecific(key, mem);
    stack_t ss;
-   ss.ss_sp = altstack;
-   ss.ss_size = sizeof(altstack);
+   ss.ss_sp = mem;
+   ss.ss_size = detail::kAltStackSize;
    ss.ss_flags = 0;
    sigaltstack(&ss, nullptr);
 }
