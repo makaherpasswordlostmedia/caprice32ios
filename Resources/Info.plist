@@ -24,11 +24,11 @@
 	<string>????</string>
 
 	<!-- Hard requirement for this port: 32-bit armv7 only, no arm64,
-	     matching iPhone 4s - 5c / iPad 2 - 4 hardware that can still
-	     run iOS 9.3. Do not add arm64 to Architectures or this becomes
+	     targeting iOS 7.x on 32-bit ARM devices (iPad 1 / iPad 2 /
+	     iPhone 4 - 5c). Do not add arm64 to Architectures or this becomes
 	     a fat binary Xcode 9's toolchain can't produce anyway. -->
 	<key>MinimumOSVersion</key>
-	<string>9.3</string>
+	<string>7.0</string>
 
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
@@ -40,6 +40,13 @@
 
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+
+	<!-- 2 = iPad. Without UIDeviceFamily, iOS treats the app as
+	     iPhone-only and letterboxes it at 2x on an iPad. -->
+	<key>UIDeviceFamily</key>
+	<array>
+		<integer>2</integer>
+	</array>
 
 	<!-- SDL2's UIKit backend expects this exact delegate class name
 	     unless SDL_MAIN_HANDLED / SDL_UIKitDelegate subclass wiring is
@@ -81,7 +88,7 @@
 			<key>UILaunchImageOrientation</key>
 			<string>Landscape</string>
 			<key>UILaunchImageSize</key>
-			<string>{768, 1024}</string>
+			<string>{1024, 768}</string>
 		</dict>
 	</array>
 
@@ -102,8 +109,6 @@
 	<!-- Let the emulator's own DSK/SNA/CDT/CPR files be opened from
 	     Files.app / Mail / AirDrop directly into this app. -->
 	<key>UIFileSharingEnabled</key>
-	<true/>
-	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 
 	<key>CFBundleDocumentTypes</key>
