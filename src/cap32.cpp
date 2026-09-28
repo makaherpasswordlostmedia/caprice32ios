@@ -60,6 +60,9 @@
 #include "CapriceGuiView.h"
 #include "CapriceVKeyboardView.h"
 #include "CapriceLeavingWithoutSavingView.h"
+#else
+// iOS: native UIKit on-screen CPC keyboard (see CPCVirtualKeyboard.mm).
+#include "CPCVirtualKeyboardBridge.h"
 #endif
 
 #include "errors.h"
@@ -2330,10 +2333,13 @@ bool userConfirmsQuitWithoutSaving()
    return true;
 }
 
+// On iOS the wGui virtual keyboard doesn't exist, so F1+Shift /
+// the joystick vkeyboard button toggle the native UIKit overlay
+// (CPCVirtualKeyboard.mm). It injects SDL key events by itself, so no
+// modal loop / surface bookkeeping is needed here.
 void showVKeyboard()
 {
-   auto guiBackSurface = prepareShowUI();
-   cleanupShowUI(guiBackSurface);
+   CPCVKbd_Toggle();
 }
 
 void showGui()
@@ -3095,6 +3101,10 @@ int cap32_main (int argc, char **argv)
    }
    fprintf(stderr, "TRACE: after video_init, before mouse_init\n"); fflush(stderr);
    CRASH_CHECKPOINT("after video_init, before mouse_init");
+#ifdef CAPRICE_NO_WGUI
+   // iOS: SDL's UIKit window exists now, so the overlay stacks above it.
+   CPCVKbd_Install();
+#endif
    mouse_init();
 
    fprintf(stderr, "TRACE: after mouse_init, before audio_init\n"); fflush(stderr);
