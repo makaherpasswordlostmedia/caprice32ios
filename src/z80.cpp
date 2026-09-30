@@ -1132,17 +1132,7 @@ int z80_execute()
 
 void z80_execute_instruction()
 {
-      static unsigned long dbg_instr_count = 0;
-      if (dbg_instr_count < 20) {
-         fprintf(stderr, "TRACE: instr %lu PC=%04x membank_read[0]=%p [1]=%p [2]=%p [3]=%p\n",
-                 dbg_instr_count, _PC,
-                 (void*)membank_read[0], (void*)membank_read[1],
-                 (void*)membank_read[2], (void*)membank_read[3]);
-         fflush(stderr);
-         dbg_instr_count++;
-      }
       byte bOpCode = read_mem(_PC++);
-      if (dbg_instr_count <= 20) { fprintf(stderr, "TRACE: instr read opcode=%02x OK\n", bOpCode); fflush(stderr); }
       iCycleCount = cc_op[bOpCode];
       _R++;
       switch(bOpCode)

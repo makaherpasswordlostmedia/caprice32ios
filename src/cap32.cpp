@@ -3592,7 +3592,11 @@ int cap32_main (int argc, char **argv)
             if (CPC.snd_enabled) {
                if (iExitCondition == EC_SOUND_BUFFER) { // Emulation filled a sound buffer.
                   if (!dwSndBufferCopied) {
-                     continue; // delay emulation until our audio callback copied and played the buffer
+                     // Delay emulation until our audio callback copied and played the buffer.
+                     // Sleep instead of busy-spinning: on a dual-core A5 the spin steals CPU
+                     // from the audio/GL threads and heats the device.
+                     SDL_Delay(1);
+                     continue;
                   }
                   dwSndBufferCopied = 0;
                }
