@@ -4,6 +4,7 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     strategy:
+      fail-fast: false
       matrix: { arch: [armv6, armv5t] }
     steps:
       - uses: actions/checkout@v4
@@ -43,6 +44,21 @@ jobs:
           echo '--- .def / export definition files anywhere in SDK'; find $SDK \( -iname '*.def' -o -iname '*.dso.txt' -o -iname '*proxy*.json' \) | head -50 || true
           for d in libc libm drtaeabi euser ws32; do echo "--- exports of $d.dso"; ls $SDK/bin | grep -E 'nm|objdump|readelf' | head -3; (for t in llvm-nm nm; do [ -x $SDK/bin/$t ] && $SDK/bin/$t -D --defined-only $SDK/proxies/$d/$d.dso && break; done) | head -400 || true; done
           echo '--- symbian-native / CLI help for proxy generation'; $SDK/bin/symbian-native proxy-sources --help || true; symbian toolchain import-proxy --help || true
+      - name: Inspect converter and the SDK example's own ELF layout
+        continue-on-error: true
+        run: |
+          SDK=$HOME/sdk
+          echo '--- SymbianApp.cmake'; cat $SDK/cmake/SymbianApp.cmake | head -400
+          echo '--- e32.cc candidates'; find $SDK -name 'e32*.cc' -o -name 'e32*.h' | head
+          for f in $(find $SDK -name 'e32.cc' | head -1); do sed -n 560,720p $f; done
+          echo '--- converter strings'; (strings -n 6 $SDK/bin/symbian-native | grep -iE "writable|data/BSS|\.got|\.dynamic|init_array" | head -40) || true
+          echo '--- build SDK hello_time and dump its sections'
+          $SDK/bin/cmake -S $SDK/examples/hello_time -B /tmp/hello -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE=$SDK/cmake/symbian-arm.cmake -DSYMBIAN_SDK_PREFIX=$SDK \
+            -DCMAKE_MAKE_PROGRAM=$SDK/bin/ninja -DSYMBIAN_TARGET_ARCH=${{ matrix.arch }} || true
+          $SDK/bin/cmake --build /tmp/hello || true
+          python3 symbian/tools/elf_sections.py /tmp/hello/hello_time.elf || true
+          readelf -lW /tmp/hello/hello_time.elf || true
       - name: Discover original Symbian export definitions (for the missing import proxies)
         continue-on-error: true
         run: |
