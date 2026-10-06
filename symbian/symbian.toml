@@ -1,0 +1,15 @@
+# Package identity. Key names are a best guess; CI uploads the SDK's own generated symbian.toml
+# (out/reference_symbian.toml) so any mismatch is a one-line diff.
+[app]
+name = "caprice32"
+caption = "Caprice32"
+uid3 = 0xe0000831
+version = "0.1.0"
+vendor = "caprice32-port"
+
+[[files]]
+source = "payload/cap32.cfg"
+dest = "E:/caprice32/cap32.cfg"
+[[files]]
+source = "payload/rom"
+dest = "E:/caprice32/rom"
