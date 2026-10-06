@@ -71,7 +71,8 @@ jobs:
         if: failure()
         run: |
           SDK=$HOME/sdk
-          for t in llvm-readelf readelf; do [ -x $SDK/bin/$t ] && $SDK/bin/$t -S -W build/caprice32.elf && break; done || true
+          python3 symbian/tools/elf_sections.py build/caprice32.elf || true
+          readelf -lW build/caprice32.elf || true
           echo '--- image.ld (patched)'; cat symbian/glue/image.ld || true
       - name: Stage payload next to the project
         run: |
