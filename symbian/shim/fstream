@@ -1,0 +1,45 @@
+// Symbian: Symbian::Streams has no file streams. Minimal ifstream/ofstream on top of stdio + string streams.
+#pragma once
+#if defined(__GLIBCXX__)
+#include_next <fstream>
+#else
+#include <sstream>
+#include <string>
+#include <stdio.h>
+namespace std {
+class ifstream : public istringstream {
+ public:
+  ifstream() {}
+  explicit ifstream(const char* n) { open(n); }
+  explicit ifstream(const string& n) { open(n.c_str()); }
+  void open(const char* n) {
+    open_ = false; FILE* f = fopen(n, "rb");
+    if (!f) { setstate(ios_base::failbit); return; }
+    string data; char buf[4096]; size_t r;
+    while ((r = fread(buf, 1, sizeof buf, f)) > 0) data.append(buf, r);
+    fclose(f); str(data); clear(); open_ = true;
+  }
+  bool is_open() const { return open_; }
+  void close() { open_ = false; }
+ private:
+  bool open_ = false;
+};
+class ofstream : public ostringstream {
+ public:
+  ofstream() {}
+  explicit ofstream(const char* n) { open(n); }
+  explicit ofstream(const string& n) { open(n.c_str()); }
+  ~ofstream() { close(); }
+  void open(const char* n) { close(); path_ = n; str(string()); clear(); open_ = true; }
+  bool is_open() const { return open_; }
+  void close() {
+    if (!open_) return; open_ = false;
+    FILE* f = fopen(path_.c_str(), "wb");
+    if (!f) { setstate(ios_base::failbit); return; }
+    string d = str(); fwrite(d.data(), 1, d.size(), f); fclose(f);
+  }
+ private:
+  string path_; bool open_ = false;
+};
+}
+#endif

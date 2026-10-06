@@ -1,0 +1,17 @@
+// Symbian: Symbian::Streams has no cout/cerr. Console output is discarded (use the log file instead).
+#pragma once
+#if defined(__GLIBCXX__)
+#include_next <iostream>
+#else
+#include <sstream>
+#include <ostream>
+#include <istream>
+#include <streambuf>
+namespace std {
+class __sym_nullbuf : public streambuf { protected: int overflow(int c) override { return c; } streamsize xsputn(const char*, streamsize n) override { return n; } };
+inline __sym_nullbuf __sym_nb;
+inline ostream cout(&__sym_nb);
+inline ostream cerr(&__sym_nb);
+inline ostream clog(&__sym_nb);
+}
+#endif
