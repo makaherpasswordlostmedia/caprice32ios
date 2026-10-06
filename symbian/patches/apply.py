@@ -22,4 +22,6 @@ void net4cpc_reset() {}
 byte net4cpc_in(byte) { return 0xFF; }
 void net4cpc_out(byte, byte) {}
 ''')
+# 4. crashlog.h relies on POSIX signals/sigaltstack (absent in OpenC): memory-only version.
+shutil.copyfile(pathlib.Path(__file__).with_name("crashlog.h"), root / "src/crashlog.h")
 print("patched")
