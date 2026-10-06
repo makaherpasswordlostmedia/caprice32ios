@@ -41,6 +41,18 @@ jobs:
           echo '--- .def / export definition files anywhere in SDK'; find $SDK \( -iname '*.def' -o -iname '*.dso.txt' -o -iname '*proxy*.json' \) | head -50 || true
           for d in libc libm drtaeabi euser ws32; do echo "--- exports of $d.dso"; ls $SDK/bin | grep -E 'nm|objdump|readelf' | head -3; (for t in llvm-nm nm; do [ -x $SDK/bin/$t ] && $SDK/bin/$t -D --defined-only $SDK/proxies/$d/$d.dso && break; done) | head -400 || true; done
           echo '--- symbian-native / CLI help for proxy generation'; $SDK/bin/symbian-native proxy-sources --help || true; symbian toolchain import-proxy --help || true
+      - name: Discover original Symbian export definitions (for the missing import proxies)
+        continue-on-error: true
+        run: |
+          echo "--- tool availability"; which symbian c++filt || true
+          symbian toolchain import-proxy --help 2>&1 | head -60 || true
+          $HOME/sdk/bin/symbian-native proxy-sources --help 2>&1 | head -60 || true
+          mkdir -p $HOME/defs && cd $HOME/defs
+          for r in oss.FCL.sf.os.kernelhwsrv oss.FCL.sf.os.graphics oss.FCL.sf.os.ossrv; do
+            timeout 600 git clone --depth 1 -q https://github.com/SymbianSource/$r.git || echo "clone failed: $r"
+          done
+          ls
+          cd $GITHUB_WORKSPACE && python3 symbian/tools/find_defs.py $HOME/defs
       - name: Configure and build
         run: |
           SDK=$HOME/sdk
