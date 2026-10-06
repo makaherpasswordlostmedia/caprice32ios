@@ -24,4 +24,8 @@ void net4cpc_out(byte, byte) {}
 ''')
 # 4. crashlog.h relies on POSIX signals/sigaltstack (absent in OpenC): memory-only version.
 shutil.copyfile(pathlib.Path(__file__).with_name("crashlog.h"), root / "src/crashlog.h")
+# 5. Symbian::Streams has no std::filebuf: load the key layout through the shim ifstream instead.
+sub("src/keyboard.cpp", "std::filebuf fb;", "std::ifstream fb;")
+sub("src/keyboard.cpp", "fb.open(filename, std::ios::in) == nullptr", "(fb.open(filename.c_str()), !fb.is_open())")
+sub("src/keyboard.cpp", "std::istream is(&fb);", "std::istream& is = fb;")
 print("patched")
