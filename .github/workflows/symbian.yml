@@ -53,12 +53,17 @@ jobs:
           done
           ls
           cd $GITHUB_WORKSPACE && python3 symbian/tools/find_defs.py $HOME/defs
+      - name: Generate missing import proxies from the original .def files
+        continue-on-error: true
+        run: |
+          SDK=$HOME/sdk
+          SDK=$SDK python3 symbian/tools/gen_proxies.py $HOME/defs $PWD/symbian/proxies_gen
       - name: Configure and build
         run: |
           SDK=$HOME/sdk
           $SDK/bin/cmake -S symbian -B build -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE=$SDK/cmake/symbian-arm.cmake -DSYMBIAN_SDK_PREFIX=$SDK \
-            -DCMAKE_MAKE_PROGRAM=$SDK/bin/ninja -DSYMBIAN_TARGET_ARCH=${{ matrix.arch }} -DCAP32_ROOT=$PWD
+            -DCMAKE_MAKE_PROGRAM=$SDK/bin/ninja -DSYMBIAN_TARGET_ARCH=${{ matrix.arch }} -DCAP32_ROOT=$PWD -DCAP_PROXY_DIR=$PWD/symbian/proxies_gen
           $SDK/bin/cmake --build build -- -k 0
       - name: Stage payload next to the project
         run: |
