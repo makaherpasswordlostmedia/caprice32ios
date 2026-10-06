@@ -30,6 +30,7 @@ jobs:
           mkdir -p symbian/glue
           cp $HOME/sdk/examples/gui_app/{startup.S,startup.cc,image.ld} symbian/glue/ || true
           cp $HOME/sdk/examples/gui_app/CMakeLists.txt symbian/glue/reference_CMakeLists.txt || true
+          echo '--- image.ld (original)'; cat symbian/glue/image.ld || true
       - name: Inspect SDK (shows how the SDK's own example wires CMake)
         run: |
           SDK=$HOME/sdk
@@ -65,6 +66,12 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE=$SDK/cmake/symbian-arm.cmake -DSYMBIAN_SDK_PREFIX=$SDK \
             -DCMAKE_MAKE_PROGRAM=$SDK/bin/ninja -DSYMBIAN_TARGET_ARCH=${{ matrix.arch }} -DCAP32_ROOT=$PWD -DCAP_PROXY_DIR=$PWD/symbian/proxies_gen
           $SDK/bin/cmake --build build -- -k 0
+      - name: Diagnose link layout (only on failure)
+        if: failure()
+        run: |
+          SDK=$HOME/sdk
+          for t in llvm-readelf readelf; do [ -x $SDK/bin/$t ] && $SDK/bin/$t -S -W build/caprice32.elf && break; done || true
+          echo '--- image.ld (patched)'; cat symbian/glue/image.ld || true
       - name: Stage payload next to the project
         run: |
           mkdir -p symbian/payload/rom symbian/payload/disks symbian/payload/snap
