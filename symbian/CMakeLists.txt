@@ -30,7 +30,12 @@ if(NOT COMMAND symbian_publish_executable)
   message(FATAL_ERROR "SDK helper commands not found. Contents of ${SYMBIAN_SDK_PREFIX}/cmake were printed by the 'Inspect SDK' CI step.")
 endif()
 
-file(GLOB CORE_SRC ${CAP32_ROOT}/src/*.cpp ${CAP32_ROOT}/src/capsimg/*/*.cpp)
+# symbian_add_import_executable only accepts sources that live inside this project (or the SDK), so mirror the
+# (already patched) core sources into the project tree at configure time. Root-level headers stay in CAP32_ROOT.
+set(CAP_LOCAL ${CMAKE_SOURCE_DIR}/cap32_src)
+file(REMOVE_RECURSE ${CAP_LOCAL})
+file(COPY ${CAP32_ROOT}/src DESTINATION ${CAP_LOCAL})
+file(GLOB CORE_SRC ${CAP_LOCAL}/src/*.cpp ${CAP_LOCAL}/src/capsimg/*/*.cpp)
 list(FILTER CORE_SRC EXCLUDE REGEX "glfuncs\\.cpp$|/gui/")
 file(GLOB ZLIB_SRC ${CMAKE_SOURCE_DIR}/third_party/zlib/*.c)
 
@@ -55,9 +60,9 @@ target_link_options(caprice32 PRIVATE --gc-sections --error-limit=0)
 
 target_include_directories(caprice32 BEFORE PRIVATE
   ${CMAKE_SOURCE_DIR}/shim ${CMAKE_SOURCE_DIR}/third_party/zlib
-  ${CAP32_ROOT} ${CAP32_ROOT}/src
-  ${CAP32_ROOT}/src/capsimg/LibIPF ${CAP32_ROOT}/src/capsimg/Device ${CAP32_ROOT}/src/capsimg/CAPSImg
-  ${CAP32_ROOT}/src/capsimg/Codec ${CAP32_ROOT}/src/capsimg/Core)
+  ${CAP32_ROOT} ${CAP_LOCAL}/src
+  ${CAP_LOCAL}/src/capsimg/LibIPF ${CAP_LOCAL}/src/capsimg/Device ${CAP_LOCAL}/src/capsimg/CAPSImg
+  ${CAP_LOCAL}/src/capsimg/Codec ${CAP_LOCAL}/src/capsimg/Core)
 target_compile_definitions(caprice32 PRIVATE CAPRICE_NO_WGUI NDEBUG HAVE_UNISTD_H PATH_MAX=260)
 target_compile_options(caprice32 PRIVATE -O2 -fno-exceptions -fno-rtti -w
                        $<$<COMPILE_LANGUAGE:C>:-std=gnu99>
