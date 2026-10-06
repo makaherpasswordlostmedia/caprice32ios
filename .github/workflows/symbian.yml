@@ -55,4 +55,6 @@ jobs:
           find . -name '*.sis*' -not -path './node_modules/*' -exec cp {} out/ \; || true
           cp build/e32/caprice32.exe out/ 2>/dev/null || true
       - uses: actions/upload-artifact@v4
-        with: { name: caprice32-symbian-${{ matrix.arch }}, path: out/ }
+        with:
+          name: caprice32-symbian-${{ matrix.arch }}
+          path: out/
