@@ -51,6 +51,7 @@ jobs:
           echo '--- e32.cc candidates'; find $SDK -name 'e32*.cc' -o -name 'e32*.h' | head
           for f in $(find $SDK -name 'e32.cc' | head -1); do sed -n 560,720p $f; done
           echo '--- converter strings'; (strings -n 6 $SDK/bin/symbian-native | grep -iE "writable|data/BSS|\.got|\.dynamic|init_array" | head -40) || true
+          echo '--- converter strings with neighbours'; (strings -n 8 $SDK/bin/symbian-native | grep -n -B12 -A12 'Writable section outside' | head -80) || true
           echo '--- build SDK hello_time and dump its sections'
           $SDK/bin/cmake -S $SDK/examples/hello_time -B /tmp/hello -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE=$SDK/cmake/symbian-arm.cmake -DSYMBIAN_SDK_PREFIX=$SDK \
@@ -104,7 +105,9 @@ jobs:
         if: failure()
         run: |
           SDK=$HOME/sdk
-          python3 symbian/tools/elf_sections.py build/caprice32.elf || true
+          python3 symbian/tools/elf_sections.py build/caprice32.elf --all || true
+          echo '--- hello_time (works) all sections'; python3 symbian/tools/elf_sections.py /tmp/hello/hello_time.elf --all || true
+          readelf -SW build/caprice32.elf | head -60 || true
           readelf -lW build/caprice32.elf || true
           readelf -x .got -x .got.plt build/caprice32.elf || true
           echo '--- image.ld (patched)'; cat symbian/glue/image.ld || true
