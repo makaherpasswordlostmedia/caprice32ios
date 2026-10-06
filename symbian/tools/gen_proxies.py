@@ -10,6 +10,7 @@ import os, re, subprocess, sys, pathlib
 
 defs_root, out_root = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 sdk = pathlib.Path(os.environ.get("SDK", pathlib.Path.home() / "sdk"))
+os.environ["PATH"] = f"{sdk / 'bin'}{os.pathsep}{os.environ.get('PATH', '')}"  # tool's inner CMake finds ld.lld/clang++ via PATH
 LIBC = """exit strncpy fputc __optind getopt_long __optarg isthreaded fileno __sfileno feof access chdir ftell strtok sprintf
 atoi fstat stat time localtime strdup mkstemp fdopen strerror realpath getcwd strcasecmp strtoul strncasecmp tmpfile
 setenv""".split()
@@ -20,7 +21,9 @@ PLAN = {
     "euser":    ("euseru.def",  ["_ZN4User6AllocZEi"], True),
     "ws32":     ("ws322u.def",  ["_ZN11RWindowBase22SetRequiredDisplayModeE12TDisplayMode", "_ZN12RWindowGroup9ConstructEm",
                                  "_ZN12RWindowGroupC1Ev", "_ZN7RWindow11BeginRedrawEv", "_ZN7RWindowC1Ev"], True),
-    "fbscli":   ("fbscli2u.def", ["_ZN10CFbsBitmap6CreateERK5TSize12TDisplayMode", "_ZN10CFbsBitmapC1Ev"], False),
+    "fbscli":   ("fbscli2u.def", ["_ZN10CFbsBitmap6CreateERK5TSize12TDisplayMode", "_ZN10CFbsBitmapC1Ev",
+                                 "_ZNK10CFbsBitmap8LockHeapEi", "_ZNK10CFbsBitmap10UnlockHeapEi",
+                                 "_ZNK10CFbsBitmap11DataAddressEv"], False),
     "dfpaeabi": ("dfpaeabiu.def", ["__aeabi_i2f"], False),
 }
 line_re = re.compile(r"^\s*(\S+)\s+@\s+(\d+)\s+NONAME")
@@ -59,7 +62,7 @@ for dll, (fname, extra, merge) in PLAN.items():
     if len(allsyms) > 256:
         print(f"[{dll}] WARNING {len(allsyms)} symbols > 256 limit; truncating SDK part"); allsyms = allsyms[:256]
     done = False
-    for target in (f"{dll}.dll", dll):
+    for target in (f"{dll}.dll",):  # the tool only accepts plain .dll/.dso basenames
         outdir = out_root / dll
         cmd = ["symbian", "toolchain", "import-proxy", str(d), "--target-dll", target, "--output", str(outdir),
                "--compiler", str(sdk / "bin" / "clang++"), "--linker", str(sdk / "bin" / "ld.lld")]
@@ -74,7 +77,7 @@ for dll, (fname, extra, merge) in PLAN.items():
 
 print("\n--- generated artifacts")
 for p in sorted(out_root.rglob("*")):
-    if p.is_file(): print(p, p.stat().st_size)
+    if p.is_file() and "CMakeFiles" not in p.parts and p.name != "CMakeCache.txt": print(p, p.stat().st_size)
 
 print("\n--- CFbsBitmap data-access related exports in FBSCLI2U.DEF (for the 3 symbols not found)")
 d = find_def("fbscli2u.def")
