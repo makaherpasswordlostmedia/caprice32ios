@@ -43,7 +43,7 @@ target_include_directories(caprice32 BEFORE PRIVATE
   ${CAP32_ROOT} ${CAP32_ROOT}/src
   ${CAP32_ROOT}/src/capsimg/LibIPF ${CAP32_ROOT}/src/capsimg/Device ${CAP32_ROOT}/src/capsimg/CAPSImg
   ${CAP32_ROOT}/src/capsimg/Codec ${CAP32_ROOT}/src/capsimg/Core)
-target_compile_definitions(caprice32 PRIVATE CAPRICE_NO_WGUI NDEBUG HAVE_UNISTD_H)
+target_compile_definitions(caprice32 PRIVATE CAPRICE_NO_WGUI NDEBUG HAVE_UNISTD_H PATH_MAX=260)
 target_compile_options(caprice32 PRIVATE -O2 -fno-exceptions -fno-rtti -w
                        $<$<COMPILE_LANGUAGE:C>:-std=gnu99>)
 # Symbian::Streams = libc++ with string streams (file streams come from shim/fstream)
