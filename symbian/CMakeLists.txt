@@ -86,7 +86,7 @@ target_include_directories(caprice32 BEFORE PRIVATE
   ${CAP_LOCAL}/src/capsimg/LibIPF ${CAP_LOCAL}/src/capsimg/Device ${CAP_LOCAL}/src/capsimg/CAPSImg
   ${CAP_LOCAL}/src/capsimg/Codec ${CAP_LOCAL}/src/capsimg/Core)
 target_compile_definitions(caprice32 PRIVATE CAPRICE_NO_WGUI NDEBUG HAVE_UNISTD_H PATH_MAX=260)
-target_compile_options(caprice32 PRIVATE -O2 -fno-exceptions -fno-rtti -w
+target_compile_options(caprice32 PRIVATE -O2 -fno-exceptions -fno-rtti -fno-threadsafe-statics -w
                        $<$<COMPILE_LANGUAGE:C>:-std=gnu99>
                        "$<$<COMPILE_LANGUAGE:C>:SHELL:-include ${CMAKE_SOURCE_DIR}/shim/c_compat.h>")
 # Symbian::Streams = libc++ with string streams (file streams come from shim/fstream)
