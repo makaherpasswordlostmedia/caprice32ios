@@ -17,7 +17,7 @@ s, ngot = re.subn(r'^[ \t]*\.got\s*:\s*\{\s*\*\(\.got\)\s*\}\s*:code[ \t]*\n', '
 extra = (" . = ALIGN(4); __init_array_start = .; KEEP(*(SORT_BY_INIT_PRIORITY(.init_array.*))) KEEP(*(.init_array)) __init_array_end = ."
          " __fini_array_start = .; KEEP(*(SORT_BY_INIT_PRIORITY(.fini_array.*))) KEEP(*(.fini_array)) __fini_array_end = .;" + (" . = ALIGN(4); *(.got)" if ngot else ""))
 s2, n = re.subn(r'(\.data\s*:\s*\{[^}]*?)(\. = ALIGN\(4\);)?(\s*\}\s*:data)',
-                lambda m: m.group(1) + extra.replace('__init_array_end = .', '__init_array_end = .;') + " . = ALIGN(4);" + m.group(3), s, count=1)
+                lambda m: m.group(1) + extra.replace('__init_array_end = .', '__init_array_end = .;') + " . = ALIGN(64);" + m.group(3), s, count=1)
 if n != 1:
     sys.exit("fix_ld: .data block not found\n" + s)
 open(p, 'w').write(s2)
