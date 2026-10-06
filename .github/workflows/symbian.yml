@@ -37,6 +37,10 @@ jobs:
           find $SDK -name '*.cmake' -not -path '*/host/*' | head -40 || true
           echo '--- examples/hello_time/CMakeLists.txt'; cat $SDK/examples/hello_time/CMakeLists.txt || true
           echo '--- gui_app'; ls $SDK/examples $SDK/examples/gui_app || true
+          echo '--- proxies'; ls -R $SDK/proxies | head -120 || true
+          echo '--- .def / export definition files anywhere in SDK'; find $SDK \( -iname '*.def' -o -iname '*.dso.txt' -o -iname '*proxy*.json' \) | head -50 || true
+          for d in libc libm drtaeabi euser ws32; do echo "--- exports of $d.dso"; ls $SDK/bin | grep -E 'nm|objdump|readelf' | head -3; (for t in llvm-nm nm; do [ -x $SDK/bin/$t ] && $SDK/bin/$t -D --defined-only $SDK/proxies/$d/$d.dso && break; done) | head -400 || true; done
+          echo '--- symbian-native / CLI help for proxy generation'; $SDK/bin/symbian-native proxy-sources --help || true; symbian toolchain import-proxy --help || true
       - name: Configure and build
         run: |
           SDK=$HOME/sdk
