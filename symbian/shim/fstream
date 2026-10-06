@@ -17,6 +17,8 @@ class basic_ifstream<char> : public istringstream {
   basic_ifstream() {}
   explicit basic_ifstream(const char* n) { open(n); }
   explicit basic_ifstream(const string& n) { open(n.c_str()); }
+  basic_ifstream(const char* n, ios_base::openmode) { open(n); }
+  basic_ifstream(const string& n, ios_base::openmode) { open(n.c_str()); }
   void open(const char* n) {
     open_ = false;
     FILE* f = fopen(n, "rb");
@@ -26,6 +28,8 @@ class basic_ifstream<char> : public istringstream {
     fclose(f); str(data); clear(); open_ = true;
   }
   void open(const string& n) { open(n.c_str()); }
+  void open(const char* n, ios_base::openmode) { open(n); }
+  void open(const string& n, ios_base::openmode) { open(n.c_str()); }
   bool is_open() const { return open_; }
   void close() { open_ = false; }
  private:
@@ -38,9 +42,13 @@ class basic_ofstream<char> : public ostringstream {
   basic_ofstream() {}
   explicit basic_ofstream(const char* n) { open(n); }
   explicit basic_ofstream(const string& n) { open(n.c_str()); }
+  basic_ofstream(const char* n, ios_base::openmode) { open(n); }
+  basic_ofstream(const string& n, ios_base::openmode) { open(n.c_str()); }
   ~basic_ofstream() { close(); }
   void open(const char* n) { close(); path_ = n; str(string()); clear(); open_ = true; }
   void open(const string& n) { open(n.c_str()); }
+  void open(const char* n, ios_base::openmode) { open(n); }
+  void open(const string& n, ios_base::openmode) { open(n.c_str()); }
   bool is_open() const { return open_; }
   void close() {
     if (!open_) return;
