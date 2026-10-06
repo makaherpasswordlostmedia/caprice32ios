@@ -1,4 +1,7 @@
-// Symbian: Symbian::Streams has no file streams. Minimal ifstream/ofstream on top of stdio + string streams.
+// Symbian: Symbian::Streams only forward-declares file streams (std::basic_ifstream etc. are incomplete types,
+// and std::ifstream/ofstream are aliases to them). Provide the missing definitions as explicit specializations of
+// the SDK's own templates, built on stdio + string streams, so `std::ifstream` / `std::ofstream` resolve to them
+// without a second, conflicting declaration of the same name.
 #pragma once
 #if defined(__GLIBCXX__)
 #include_next <fstream>
@@ -7,33 +10,41 @@
 #include <string>
 #include <stdio.h>
 namespace std {
-class ifstream : public istringstream {
+
+template <>
+class basic_ifstream<char> : public istringstream {
  public:
-  ifstream() {}
-  explicit ifstream(const char* n) { open(n); }
-  explicit ifstream(const string& n) { open(n.c_str()); }
+  basic_ifstream() {}
+  explicit basic_ifstream(const char* n) { open(n); }
+  explicit basic_ifstream(const string& n) { open(n.c_str()); }
   void open(const char* n) {
-    open_ = false; FILE* f = fopen(n, "rb");
+    open_ = false;
+    FILE* f = fopen(n, "rb");
     if (!f) { setstate(ios_base::failbit); return; }
     string data; char buf[4096]; size_t r;
     while ((r = fread(buf, 1, sizeof buf, f)) > 0) data.append(buf, r);
     fclose(f); str(data); clear(); open_ = true;
   }
+  void open(const string& n) { open(n.c_str()); }
   bool is_open() const { return open_; }
   void close() { open_ = false; }
  private:
   bool open_ = false;
 };
-class ofstream : public ostringstream {
+
+template <>
+class basic_ofstream<char> : public ostringstream {
  public:
-  ofstream() {}
-  explicit ofstream(const char* n) { open(n); }
-  explicit ofstream(const string& n) { open(n.c_str()); }
-  ~ofstream() { close(); }
+  basic_ofstream() {}
+  explicit basic_ofstream(const char* n) { open(n); }
+  explicit basic_ofstream(const string& n) { open(n.c_str()); }
+  ~basic_ofstream() { close(); }
   void open(const char* n) { close(); path_ = n; str(string()); clear(); open_ = true; }
+  void open(const string& n) { open(n.c_str()); }
   bool is_open() const { return open_; }
   void close() {
-    if (!open_) return; open_ = false;
+    if (!open_) return;
+    open_ = false;
     FILE* f = fopen(path_.c_str(), "wb");
     if (!f) { setstate(ios_base::failbit); return; }
     string d = str(); fwrite(d.data(), 1, d.size(), f); fclose(f);
@@ -41,5 +52,6 @@ class ofstream : public ostringstream {
  private:
   string path_; bool open_ = false;
 };
-}
+
+}  // namespace std
 #endif
