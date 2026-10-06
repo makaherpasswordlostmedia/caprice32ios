@@ -32,7 +32,6 @@ jobs:
           cp $HOME/sdk/examples/gui_app/{startup.S,startup.cc,image.ld} symbian/glue/ || true
           cp $HOME/sdk/examples/gui_app/CMakeLists.txt symbian/glue/reference_CMakeLists.txt || true
           echo '--- image.ld (original)'; cat symbian/glue/image.ld || true
-          python3 symbian/tools/fix_ld.py symbian/glue/image.ld
       - name: Inspect SDK (shows how the SDK's own example wires CMake)
         run: |
           SDK=$HOME/sdk
@@ -59,6 +58,24 @@ jobs:
           $SDK/bin/cmake --build /tmp/hello || true
           python3 symbian/tools/elf_sections.py /tmp/hello/hello_time.elf || true
           readelf -lW /tmp/hello/hello_time.elf || true
+      - name: Bisect converter limits on the SDK example (big BSS / pointer data)
+        continue-on-error: true
+        run: |
+          SDK=$HOME/sdk
+          try() {  # name, extra source file content
+            d=/tmp/v_$1; rm -rf $d; cp -r $SDK/examples/hello_time $d
+            printf '%s\n' "$2" > $d/extra.cc
+            sed -i 's/SOURCES app.cc/SOURCES extra.cc app.cc/' $d/CMakeLists.txt
+            echo 'target_link_options(hello_time PRIVATE --undefined=probe_sym)' >> $d/CMakeLists.txt
+            $SDK/bin/cmake -S $d -B $d/b -G Ninja -DCMAKE_TOOLCHAIN_FILE=$SDK/cmake/symbian-arm.cmake \
+              -DSYMBIAN_SDK_PREFIX=$SDK -DCMAKE_MAKE_PROGRAM=$SDK/bin/ninja -DSYMBIAN_TARGET_ARCH=${{ matrix.arch }} >/dev/null
+            if $SDK/bin/cmake --build $d/b > $d/log.txt 2>&1; then echo "RESULT $1: OK"; else echo "RESULT $1: FAIL"; tail -6 $d/log.txt | cut -c1-200; fi
+            python3 symbian/tools/elf_sections.py $d/b/hello_time.elf | grep -E "^\.(data|bss)"
+          }
+          try bss480k 'extern "C" { char probe_sym[480000]; }'
+          try bss240k 'extern "C" { char probe_sym[240000]; }'
+          try data20k_ptrs 'extern "C" { const char* probe_sym[5000] = {"a","b","c","d"}; }'
+          try data20k_plain 'extern "C" { int probe_sym[5000] = {1,2,3,4}; }'
       - name: Discover original Symbian export definitions (for the missing import proxies)
         continue-on-error: true
         run: |
