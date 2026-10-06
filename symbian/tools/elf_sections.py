@@ -22,6 +22,6 @@ TYPES = {0:'NULL',1:'PROGBITS',2:'SYMTAB',3:'STRTAB',4:'RELA',5:'HASH',6:'DYNAMI
 print(f"{'name':24}{'type':12}{'flags':6}{'addr':>10}{'size':>10}")
 for n, t, f, a, off, sz in secs:
     fl = ('W' if f & 1 else '') + ('A' if f & 2 else '') + ('X' if f & 4 else '') + ('T' if f & 0x400 else '')
-    mark = '   <== writable' if (f & 1 and f & 2) else ''
-    if f & 2 or mark:
+    mark = ('   <== writable' if (f & 1 and f & 2) else '') + ('   <== WRITABLE NON-ALLOC' if (f & 1 and not f & 2) else '')
+    if f & 2 or mark or '--all' in sys.argv:
         print(f"{name(n):24}{TYPES.get(t, hex(t)):12}{fl:6}{a:>#10x}{sz:>#10x}{mark}")
