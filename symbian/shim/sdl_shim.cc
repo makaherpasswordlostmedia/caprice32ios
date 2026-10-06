@@ -3,6 +3,7 @@
 #include "sym_backend.h"
 #include "vkbd.h"
 #include <stdlib.h>
+#include <iostream>  // shim/iostream: declares std::cout & co; defined below, once
 #include <stdio.h>
 #include <stdarg.h>
 
@@ -186,3 +187,13 @@ int SDL_NumJoysticks(void) { return 0; }
 SDL_Joystick* SDL_JoystickOpen(int) { return nullptr; }
 void SDL_JoystickClose(SDL_Joystick*) {}
 }
+
+// Single definitions of the discarded console streams (see shim/iostream). Host builds use the real libstdc++ ones.
+#if !defined(__GLIBCXX__)
+namespace std {
+__sym_nullbuf __sym_nb;
+ostream cout(&__sym_nb);
+ostream cerr(&__sym_nb);
+ostream clog(&__sym_nb);
+}  // namespace std
+#endif

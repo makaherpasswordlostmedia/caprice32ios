@@ -9,9 +9,12 @@
 #include <streambuf>
 namespace std {
 class __sym_nullbuf : public streambuf { protected: int overflow(int c) override { return c; } streamsize xsputn(const char*, streamsize n) override { return n; } };
-inline __sym_nullbuf __sym_nb;
-inline ostream cout(&__sym_nb);
-inline ostream cerr(&__sym_nb);
-inline ostream clog(&__sym_nb);
+// Defined exactly once in shim/sdl_shim.cc. They must NOT be `inline` variables: clang emits those per translation
+// unit as COMDAT .bss sections carrying SHF_GNU_RETAIN, which marks the merged .bss with an OS-specific flag that
+// symbian-native convert-exe rejects ("Writable section outside data/BSS layout").
+extern __sym_nullbuf __sym_nb;
+extern ostream cout;
+extern ostream cerr;
+extern ostream clog;
 }
 #endif
