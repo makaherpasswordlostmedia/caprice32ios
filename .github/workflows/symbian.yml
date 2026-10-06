@@ -43,7 +43,7 @@ jobs:
           $SDK/bin/cmake -S symbian -B build -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE=$SDK/cmake/symbian-arm.cmake -DSYMBIAN_SDK_PREFIX=$SDK \
             -DCMAKE_MAKE_PROGRAM=$SDK/bin/ninja -DSYMBIAN_TARGET_ARCH=${{ matrix.arch }} -DCAP32_ROOT=$PWD
-          $SDK/bin/cmake --build build
+          $SDK/bin/cmake --build build -- -k 0
       - name: Stage payload next to the project
         run: |
           mkdir -p symbian/payload/rom symbian/payload/disks symbian/payload/snap
