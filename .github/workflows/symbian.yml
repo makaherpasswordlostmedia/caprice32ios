@@ -73,6 +73,7 @@ jobs:
           SDK=$HOME/sdk
           python3 symbian/tools/elf_sections.py build/caprice32.elf || true
           readelf -lW build/caprice32.elf || true
+          readelf -x .got -x .got.plt build/caprice32.elf || true
           echo '--- image.ld (patched)'; cat symbian/glue/image.ld || true
       - name: Stage payload next to the project
         run: |
