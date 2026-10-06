@@ -65,7 +65,7 @@ jobs:
           SDK=$HOME/sdk
           try() {  # name, extra source file content
             d=/tmp/v_$1; rm -rf $d; cp -r $SDK/examples/hello_time $d
-            printf '%s\n' "$2" > $d/extra.cc
+            printf '%b\n' "$2" > $d/extra.cc
             sed -i 's/SOURCES app.cc/SOURCES extra.cc app.cc/' $d/CMakeLists.txt
             echo 'target_link_options(hello_time PRIVATE --undefined=probe_sym)' >> $d/CMakeLists.txt
             $SDK/bin/cmake -S $d -B $d/b -G Ninja -DCMAKE_TOOLCHAIN_FILE=$SDK/cmake/symbian-arm.cmake \
@@ -73,10 +73,12 @@ jobs:
             if $SDK/bin/cmake --build $d/b > $d/log.txt 2>&1; then echo "RESULT $1: OK"; else echo "RESULT $1: FAIL"; tail -6 $d/log.txt | cut -c1-200; fi
             python3 symbian/tools/elf_sections.py $d/b/hello_time.elf | grep -E "^\.(data|bss)"
           }
-          try bss480k 'extern "C" { char probe_sym[480000]; }'
-          try bss240k 'extern "C" { char probe_sym[240000]; }'
-          try data20k_ptrs 'extern "C" { const char* probe_sym[5000] = {"a","b","c","d"}; }'
-          try data20k_plain 'extern "C" { int probe_sym[5000] = {1,2,3,4}; }'
+          try ctors14 'extern "C" { volatile int probe_sym; } struct C { C() { probe_sym = probe_sym + 1; } }; C c0,c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11,c12,c13;'
+          try fnptr_data 'extern "C" { void f1() {} void f2() {} void (*probe_sym[300])() = {f1, f2, f1}; }'
+          try dataptr_to_bss 'extern "C" { int tgt[4]; int* probe_sym[300] = {tgt, tgt + 1, tgt + 2}; }'
+          try data_align64 'extern "C" { alignas(64) int probe_sym[4] = {1}; }'
+          try global_dtor '#include <string>\nextern "C" { volatile int probe_sym; } std::string g("hello world, long enough to avoid sso......"); struct D { ~D() { probe_sym = 1; } } d;'
+          try data_plus_big_bss 'extern "C" { const char* probe_sym[5000] = {"a"}; char big[480000]; int* use_big() { return (int*)big; } }'
       - name: Discover original Symbian export definitions (for the missing import proxies)
         continue-on-error: true
         run: |
