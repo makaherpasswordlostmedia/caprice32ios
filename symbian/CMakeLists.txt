@@ -44,8 +44,30 @@ set(CAP_SOURCES ${CORE_SRC} ${ZLIB_SRC}
 
 # Same wiring as the SDK's examples/gui_app: import proxies (libc, libm, euser, ...) + startup bridge + linker script.
 # CI copies startup.S / startup.cc / image.ld from the SDK example into symbian/glue.
-foreach(dll euser ws32 gdi libc libm libpthread drtaeabi)
-  list(APPEND SYMBIAN_IMPORT_PROXIES "${SYMBIAN_SDK_PREFIX}/proxies/${dll}/${dll}.dso")
+# The SDK's proxies are frozen subsets. CI generates replacements (superset of the SDK's exports + what this port needs)
+# from the original .def files into CAP_PROXY_DIR; the linker keeps only the first .dso per soname, so a generated one
+# must replace the SDK's, not sit beside it. fbscli/dfpaeabi have no SDK proxy and are simply added.
+set(CAP_PROXY_DIR "" CACHE PATH "Generated import proxies (symbian/tools/gen_proxies.py)")
+function(cap_find_proxy dll outvar)
+  set(${outvar} "" PARENT_SCOPE)
+  if(CAP_PROXY_DIR)
+    file(GLOB_RECURSE found "${CAP_PROXY_DIR}/${dll}.dso")
+    if(found)
+      list(GET found 0 first)
+      set(${outvar} "${first}" PARENT_SCOPE)
+    endif()
+  endif()
+endfunction()
+foreach(dll euser ws32 gdi libc libm libpthread drtaeabi fbscli dfpaeabi)
+  cap_find_proxy(${dll} gen)
+  if(gen)
+    message(STATUS "import proxy ${dll}: generated ${gen}")
+    list(APPEND SYMBIAN_IMPORT_PROXIES "${gen}")
+  elseif(EXISTS "${SYMBIAN_SDK_PREFIX}/proxies/${dll}/${dll}.dso")
+    list(APPEND SYMBIAN_IMPORT_PROXIES "${SYMBIAN_SDK_PREFIX}/proxies/${dll}/${dll}.dso")
+  else()
+    message(STATUS "import proxy ${dll}: none available")
+  endif()
 endforeach()
 set(GLUE ${CMAKE_SOURCE_DIR}/glue)
 if(COMMAND symbian_add_import_executable AND EXISTS ${GLUE}/startup.S AND EXISTS ${GLUE}/image.ld)
