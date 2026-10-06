@@ -31,6 +31,7 @@ jobs:
           cp $HOME/sdk/examples/gui_app/{startup.S,startup.cc,image.ld} symbian/glue/ || true
           cp $HOME/sdk/examples/gui_app/CMakeLists.txt symbian/glue/reference_CMakeLists.txt || true
           echo '--- image.ld (original)'; cat symbian/glue/image.ld || true
+          python3 symbian/tools/fix_ld.py symbian/glue/image.ld
       - name: Inspect SDK (shows how the SDK's own example wires CMake)
         run: |
           SDK=$HOME/sdk
