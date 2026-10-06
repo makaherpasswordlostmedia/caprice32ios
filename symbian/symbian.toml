@@ -1,15 +1,12 @@
-# Package identity. Key names are a best guess; CI uploads the SDK's own generated symbian.toml
-# (out/reference_symbian.toml) so any mismatch is a one-line diff.
-[app]
-name = "caprice32"
-caption = "Caprice32"
-uid3 = 0xe0000831
-version = "0.1.0"
+# Package identity for `symbian package` (see the SDK's "Package an application" guide).
+# All fields are required, unknown fields are rejected. The package UID must differ from the executable UID3
+# (0xe0000831, set in CMakeLists.txt via symbian_publish_executable).
+[package]
+uid = 0xe0000832
+name = "Caprice32"
 vendor = "caprice32-port"
+executable_name = "caprice32.exe"
+version = [0, 1, 0]
 
-[[files]]
-source = "payload/cap32.cfg"
-dest = "E:/caprice32/cap32.cfg"
-[[files]]
-source = "payload/rom"
-dest = "E:/caprice32/rom"
+# The SDK's SIS writer packages only the executable (plus optional [application] menu resources); it cannot embed
+# data files. Copy cap32.cfg and the ROM images to the phone manually (see README_PORT.md).
