@@ -110,6 +110,11 @@ jobs:
           python3 symbian/tools/elf_sections.py build/caprice32.elf --all || true
           echo '--- hello_time (works) all sections'; python3 symbian/tools/elf_sections.py /tmp/hello/hello_time.elf --all || true
           readelf -SW build/caprice32.elf | head -60 || true
+          echo '--- sections with OS/processor flag bits: final ELF, our objects, SDK archives'
+          python3 symbian/tools/elf_flags.py build/caprice32.elf || true
+          python3 symbian/tools/elf_flags.py $(find build -name '*.obj') 2>&1 | head -40 || true
+          python3 symbian/tools/elf_flags.py $SDK/lib/${{ matrix.arch }}/libsymbian_guest_runtime_streams.a $SDK/lib/${{ matrix.arch }}/libsymbian_guest_runtime.a 2>&1 | head -40 || true
+          echo '--- hello_time (works) readelf -SW'; readelf -SW /tmp/hello/hello_time.elf | grep -E "data|bss|got|array" || true
           readelf -lW build/caprice32.elf || true
           readelf -x .got -x .got.plt build/caprice32.elf || true
           echo '--- image.ld (patched)'; cat symbian/glue/image.ld || true
