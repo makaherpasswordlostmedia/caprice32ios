@@ -8,5 +8,8 @@ vendor = "caprice32-port"
 executable_name = "caprice32.exe"
 version = [0, 1, 0]
 
-# The SDK's SIS writer packages only the executable (plus optional [application] menu resources); it cannot embed
-# data files. Copy cap32.cfg and the ROM images to the phone manually (see README_PORT.md).
+# Application-menu registration: without this table the SIS only installs the .exe and nothing appears in the menu.
+[application]
+caption = "Caprice32"
+short_caption = "Caprice32"
+icon = "icon.svg"
