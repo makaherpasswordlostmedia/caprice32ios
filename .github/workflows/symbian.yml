@@ -130,7 +130,17 @@ jobs:
           mkdir -p out/package
           echo "{\"sdk\": \"$SDK\"}" > symbian/sdk-location.json
           symbian package --help || true
-          symbian package --project symbian --artifact build/e32/caprice32.exe --output out/package
+          # Try the full config (menu entry + icon); if the SDK rejects a field, fall back step by step.
+          cp symbian/symbian.toml /tmp/full.toml
+          grep -v '^icon' /tmp/full.toml > /tmp/noicon.toml
+          sed '/^\[application\]/,$d' /tmp/full.toml > /tmp/noapp.toml
+          ok=0
+          for v in full noicon noapp; do
+            cp /tmp/$v.toml symbian/symbian.toml
+            if symbian package --project symbian --artifact build/e32/caprice32.exe --output out/package; then echo "PACKAGED with: $v"; ok=1; break; fi
+          done
+          cp /tmp/full.toml symbian/symbian.toml
+          [ $ok = 1 ]
           symbian inspect --format sis out/package/*.sis || true
           cp build/e32/caprice32.exe out/ 2>/dev/null || true
       - uses: actions/upload-artifact@v4
