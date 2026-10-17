@@ -3662,7 +3662,30 @@ int cap32_main (int argc, char **argv)
             CRASH_CHECKPOINT_FAST("main loop: before asic_draw_sprites");
             asic_draw_sprites();
             CRASH_CHECKPOINT_FAST("main loop: before video_display");
+#ifdef CAPRICE_IOS7
+            {
+               // Adaptive frameskip (iPad 1 / mini 1). Presenting a frame (texture
+               // upload + GL present + compositor with the touch overlay) is the most
+               // expensive part of a frame on these GPUs. If the previous frame took
+               // noticeably longer than the 20 ms budget, skip presenting up to 2
+               // frames in a row so the Z80/CRTC/PSG emulation (and the audio) can
+               // catch up. The emulated picture is still rendered into the surface,
+               // only the on-screen update is dropped, so game speed stays correct.
+               static Uint32 lastFrameTicks = 0;
+               static int skippedFrames = 0;
+               Uint32 nowTicks = SDL_GetTicks();
+               bool behind = lastFrameTicks != 0 && (nowTicks - lastFrameTicks) > 26;
+               lastFrameTicks = nowTicks;
+               if (behind && skippedFrames < 2) {
+                  skippedFrames++;
+               } else {
+                  skippedFrames = 0;
+                  video_display(); // update PC display
+               }
+            }
+#else
             video_display(); // update PC display
+#endif
             CRASH_CHECKPOINT_FAST("main loop: after video_display");
             if (take_screenshot) {
               dumpScreen();
