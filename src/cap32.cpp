@@ -128,6 +128,12 @@ byte *pbMF2ROMbackup = nullptr;
 byte *pbMF2ROM = nullptr;
 std::vector<byte> pbTapeImage;
 byte keyboard_matrix[16];
+#ifdef CAPRICE_IOS7
+// Bit mask of the on-screen pad: 0 left, 1 right, 2 up, 3 down, 4 fire1, 5 fire2.
+// Written by the UI thread, read by the emulator loop.
+static volatile unsigned int g_ios_pad_mask = 0;
+extern "C" void cap32_ios_set_pad(unsigned int mask) { g_ios_pad_mask = mask; }
+#endif
 
 std::list<SDL_Event> virtualKeyboardEvents;
 dword nextVirtualEventFrameCount, dwFrameCountOverall = 0;
@@ -3256,6 +3262,30 @@ int cap32_main (int argc, char **argv)
         applyKeypress(CPC.InputMapper->CPCscancodeFromCPCkey(CPC_J0_DOWN), keyboard_matrix, false, false);
         applyKeypress(CPC.InputMapper->CPCscancodeFromCPCkey(CPC_J0_UP), keyboard_matrix, false, false);
       }
+#ifdef CAPRICE_IOS7
+      {
+         // On-screen game pad -> CPC joystick 0, written straight into the
+         // keyboard matrix like a hardware gamepad. The state is re-applied
+         // on every pass of the emulator loop, so a held direction can never
+         // drop out, no matter what the SDL key-event queue is doing.
+         static const CPC_KEYS padKeys[6] = { CPC_J0_LEFT, CPC_J0_RIGHT, CPC_J0_UP,
+                                              CPC_J0_DOWN, CPC_J0_FIRE1, CPC_J0_FIRE2 };
+         static unsigned int appliedMask = 0;
+         unsigned int mask = g_ios_pad_mask;
+         if (!CPC.paused) {
+            for (int i = 0; i < 6; i++) {
+               bool want = (mask >> i) & 1;
+               bool had = (appliedMask >> i) & 1;
+               if (!want && !had) continue;
+               byte sc = static_cast<byte>(CPC.InputMapper->CPCscancodeFromCPCkey(padKeys[i]));
+               if (sc == 0xff) continue;
+               if (want) keyboard_matrix[sc >> 4] &= ~bit_values[sc & 7];
+               else      keyboard_matrix[sc >> 4] |= bit_values[sc & 7];
+            }
+            appliedMask = mask;
+         }
+      }
+#endif
       while (SDL_PollEvent(&event)) {
          bool processed = false;
          if (!devtools.empty()) {

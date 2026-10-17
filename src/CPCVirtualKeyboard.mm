@@ -210,6 +210,8 @@ static NSArray<NSArray<CPCKeyDef *> *> *BuildLayout(void)
 // ---------------------------------------------------------------------
 // SDL event injection
 // ---------------------------------------------------------------------
+extern "C" void cap32_ios_set_pad(unsigned int mask);
+
 static void PushKey(SDL_Keycode sym, Uint16 mod, bool down)
 {
     SDL_Event e;
@@ -616,8 +618,11 @@ static const NSInteger kRowCount = 6;
 {
     if (_held[i] == down) return;
     _held[i] = down;
-    PushKey(_syms[i], 0, down);
-    [self updateRepeatTimer];
+    // Joystick-style: publish the whole pad state as a bitmask; the
+    // emulator applies it to CPC joystick 0 every loop pass.
+    unsigned int mask = 0;
+    for (NSInteger k = 0; k < 6; k++) if (_held[k]) mask |= (1u << k);
+    cap32_ios_set_pad(mask);
     _labels[i].backgroundColor = down
         ? [UIColor colorWithRed:0.20 green:0.50 blue:0.85 alpha:0.85]
         : [UIColor colorWithWhite:0.05 alpha:0.55];
