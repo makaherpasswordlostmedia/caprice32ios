@@ -533,6 +533,9 @@ static const NSInteger kRowCount = 6;
     BOOL _held[6];
     // touch -> bitmask of keys it currently holds
     NSMapTable<UITouch *, NSNumber *> *_touchKeys;
+    // 50 Hz timer that re-asserts every held key (like a real keyboard's
+    // auto-repeat) so a held direction cannot silently drop out.
+    NSTimer *_repeatTimer;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame
@@ -614,9 +617,32 @@ static const NSInteger kRowCount = 6;
     if (_held[i] == down) return;
     _held[i] = down;
     PushKey(_syms[i], 0, down);
+    [self updateRepeatTimer];
     _labels[i].backgroundColor = down
         ? [UIColor colorWithRed:0.20 green:0.50 blue:0.85 alpha:0.85]
         : [UIColor colorWithWhite:0.05 alpha:0.55];
+}
+
+- (void)updateRepeatTimer
+{
+    BOOL any = NO;
+    for (NSInteger i = 0; i < 6; i++) if (_held[i]) any = YES;
+    if (any && !_repeatTimer) {
+        _repeatTimer = [NSTimer timerWithTimeInterval:0.02 target:self
+                                             selector:@selector(repeatHeld)
+                                             userInfo:nil repeats:YES];
+        [[NSRunLoop mainRunLoop] addTimer:_repeatTimer forMode:NSRunLoopCommonModes];
+    } else if (!any && _repeatTimer) {
+        [_repeatTimer invalidate];
+        _repeatTimer = nil;
+    }
+}
+
+- (void)repeatHeld
+{
+    for (NSInteger i = 0; i < 6; i++) {
+        if (_held[i]) PushKey(_syms[i], 0, true);
+    }
 }
 
 // Recompute which keys are held from all active touches (handles a
