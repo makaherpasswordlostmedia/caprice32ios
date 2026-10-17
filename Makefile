@@ -44,7 +44,7 @@ SDK_ROOT ?= $(THEOS)/sdks/iPhoneOS9.3.sdk
 # instead of disabling -Werror wholesale.
 # Explicit optimisation (no -mcpu: same binary must run on iPad 1 (A4) and iPad mini 1 (A5)). Appended last so it wins over
 # whatever Theos picks. -ffast-math is safe here (no NaN/Inf reliance in the emulator).
-ADDITIONAL_CFLAGS += -O2 -ffast-math -fomit-frame-pointer -fno-stack-protector
+ADDITIONAL_CFLAGS += -O2 -ffast-math -fno-stack-protector
 ADDITIONAL_CFLAGS += -fno-modules -fno-cxx-modules -fno-implicit-modules -fno-implicit-module-maps \
 	-Wno-error=objc-property-no-attribute -Wno-error=property-attribute-mismatch
 
