@@ -3,11 +3,11 @@ Derived from the iOS 9.3 port in this repo. Same emulator core, same Theos/CI pi
 
 full speed have ipad air 1(A7)
 
-10 fps on ipad mini 1(A5)
+50 fps on ipad mini 1(A5)
 
-5 fps on ipad 1(A4)
+50 fps on ipad 1(A4)
 
-A6 no checked(25 fps?)
+A6 no checked(60 fps?)
 
 Read this first: iPad 1
 Apple shipped iPad 1 (A4, 256 MB RAM) with iOS up to 5.1.1; it never officially ran 7.x. If your iPad 1 is really on 7.1.2 it is a custom-firmware / jailbroken setup, and you should expect:
