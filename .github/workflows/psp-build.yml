@@ -26,7 +26,7 @@ jobs:
           cat > /tmp/port.diff <<'PSP_PATCH_EOF'
           diff -ruN a/.gitignore b/.gitignore
           --- a/.gitignore	2026-10-18 07:29:52.000000000 +0000
-          +++ b/.gitignore	2026-10-30 11:26:02.175188824 +0000
+          +++ b/.gitignore	2026-10-30 11:48:43.271872190 +0000
           @@ -17,3 +17,11 @@
            debian/caprice32.postrm.debhelper
            debian/caprice32.substvars
@@ -41,7 +41,7 @@ jobs:
           +/dist
           diff -ruN a/Makefile.psp b/Makefile.psp
           --- a/Makefile.psp	1970-01-01 00:00:00.000000000 +0000
-          +++ b/Makefile.psp	2026-10-30 11:26:02.250758265 +0000
+          +++ b/Makefile.psp	2026-10-30 11:48:43.299058620 +0000
           @@ -0,0 +1,50 @@
           +# Caprice32 for PSP (pspdev toolchain + SDL2).
           +#   make -f Makefile.psp            -> EBOOT.PBP
@@ -57,7 +57,7 @@ jobs:
           +CFLAGS = -O2 -G0 -ffast-math -fno-strict-aliasing -fomit-frame-pointer \
           +         -DCAPRICE_NO_WGUI -DCAPRICE_NO_LOG -DCAPRICE_FAST_VIDEO -DNDEBUG \
           +         -Wno-write-strings
-          +CXXFLAGS = $(CFLAGS) -std=gnu++17
+          +CXXFLAGS = $(CFLAGS) -std=gnu++17 -fpermissive
           +ASFLAGS = $(CFLAGS)
           +
           +PSP_FW_VERSION = 661
@@ -95,7 +95,7 @@ jobs:
           +	rm -f dist/Caprice32/resources/*.ttf
           diff -ruN a/psp/cap32.cfg b/psp/cap32.cfg
           --- a/psp/cap32.cfg	1970-01-01 00:00:00.000000000 +0000
-          +++ b/psp/cap32.cfg	2026-10-30 11:26:02.249509818 +0000
+          +++ b/psp/cap32.cfg	2026-10-30 11:48:43.306234458 +0000
           @@ -0,0 +1,51 @@
           +# Caprice32 PSP configuration (read from the folder holding EBOOT.PBP)
           +[system]
@@ -150,7 +150,7 @@ jobs:
           +rom_mf2=MF2.rom
           diff -ruN a/psp/main_psp.cpp b/psp/main_psp.cpp
           --- a/psp/main_psp.cpp	1970-01-01 00:00:00.000000000 +0000
-          +++ b/psp/main_psp.cpp	2026-10-30 11:26:02.248500300 +0000
+          +++ b/psp/main_psp.cpp	2026-10-30 11:48:43.305859777 +0000
           @@ -0,0 +1,41 @@
           +// PSP entry point. SDL2's PSP backend (libSDL2main) provides the real
           +// main(), module info and exit callback, then calls SDL_main() below.
@@ -195,7 +195,7 @@ jobs:
           +}
           diff -ruN a/psp/net4cpc_stub.cpp b/psp/net4cpc_stub.cpp
           --- a/psp/net4cpc_stub.cpp	1970-01-01 00:00:00.000000000 +0000
-          +++ b/psp/net4cpc_stub.cpp	2026-10-30 11:26:02.249238788 +0000
+          +++ b/psp/net4cpc_stub.cpp	2026-10-30 11:48:43.305952938 +0000
           @@ -0,0 +1,6 @@
           +// Net4CPC needs BSD sockets, which the PSP build does not use.
           +#include "net4cpc.h"
@@ -205,7 +205,7 @@ jobs:
           +void net4cpc_out(byte, byte) {}
           diff -ruN a/psp/psp_ui.cpp b/psp/psp_ui.cpp
           --- a/psp/psp_ui.cpp	1970-01-01 00:00:00.000000000 +0000
-          +++ b/psp/psp_ui.cpp	2026-10-30 11:26:02.248220341 +0000
+          +++ b/psp/psp_ui.cpp	2026-10-30 11:48:43.305775132 +0000
           @@ -0,0 +1,466 @@
           +// PSP front-end for Caprice32 (SDL2 / pspdev). See psp_ui.h.
           +#include "psp_ui.h"
@@ -675,7 +675,7 @@ jobs:
           +}
           diff -ruN a/psp/psp_ui.h b/psp/psp_ui.h
           --- a/psp/psp_ui.h	1970-01-01 00:00:00.000000000 +0000
-          +++ b/psp/psp_ui.h	2026-10-30 11:26:02.246586272 +0000
+          +++ b/psp/psp_ui.h	2026-10-30 11:48:43.305597208 +0000
           @@ -0,0 +1,22 @@
           +// PSP front-end for Caprice32: pad handling, on-screen CPC keyboard and a
           +// small menu (load disk/tape/snapshot/cartridge, reset, quit...).
@@ -701,7 +701,7 @@ jobs:
           +#endif
           diff -ruN a/src/cap32.cpp b/src/cap32.cpp
           --- a/src/cap32.cpp	2026-10-18 07:29:52.000000000 +0000
-          +++ b/src/cap32.cpp	2026-10-30 11:26:02.190959313 +0000
+          +++ b/src/cap32.cpp	2026-10-30 11:48:43.280312950 +0000
           @@ -60,11 +60,21 @@
            #include "CapriceGuiView.h"
            #include "CapriceVKeyboardView.h"
@@ -869,9 +869,21 @@ jobs:
                  }
               }
 
+          diff -ruN a/src/cap32.h b/src/cap32.h
+          --- a/src/cap32.h	2026-10-18 07:29:52.000000000 +0000
+          +++ b/src/cap32.h	2026-10-30 11:48:43.299040123 +0000
+          @@ -385,7 +385,7 @@
+              unsigned int scr_mode;
+              unsigned char pen;
+              unsigned char ink_values[17];
+          -   unsigned int palette[34];
+          +   dword palette[34];
+              unsigned char sl_count;
+              unsigned char int_delay;
+           } t_GateArray;
           diff -ruN a/src/crashlog.h b/src/crashlog.h
           --- a/src/crashlog.h	2026-10-18 07:29:52.000000000 +0000
-          +++ b/src/crashlog.h	2026-10-30 11:26:02.200366722 +0000
+          +++ b/src/crashlog.h	2026-10-30 11:48:43.285469494 +0000
           @@ -34,6 +34,22 @@
            // combined with the existing crash report's stack (same binary offsets)
            // tells you exactly which C++ statement was executing.
@@ -904,7 +916,7 @@ jobs:
            #endif
           diff -ruN a/src/ipf.cpp b/src/ipf.cpp
           --- a/src/ipf.cpp	2026-10-18 07:29:52.000000000 +0000
-          +++ b/src/ipf.cpp	2026-10-30 11:26:02.218248683 +0000
+          +++ b/src/ipf.cpp	2026-10-30 11:48:43.296064213 +0000
           @@ -3,7 +3,7 @@
 
            #ifdef WINDOWS
