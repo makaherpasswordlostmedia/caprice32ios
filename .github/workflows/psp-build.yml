@@ -1,0 +1,943 @@
+name: Build PSP (EBOOT.PBP)
+
+# Self-contained: applies the whole Caprice32 PSP port as a patch to the
+# repository (src/cap32.cpp, crashlog.h, ipf.cpp + new psp/ files and
+# Makefile.psp), then builds EBOOT.PBP with pspdev.
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch: {}
+  release:
+    types: [published]
+
+jobs:
+  build-psp:
+    runs-on: ubuntu-latest
+    container: ghcr.io/pspdev/pspdev:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply PSP port patch
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [ -f Makefile.psp ]; then echo "PSP port already applied"; exit 0; fi
+          cat > /tmp/port.diff <<'PSP_PATCH_EOF'
+          diff -ruN a/.gitignore b/.gitignore
+          --- a/.gitignore	2026-10-18 07:29:52.000000000 +0000
+          +++ b/.gitignore	2026-10-30 11:26:02.175188824 +0000
+          @@ -17,3 +17,11 @@
+           debian/caprice32.postrm.debhelper
+           debian/caprice32.substvars
+           debian/files
+          +
+          +# PSP build
+          +*.o
+          +*.elf
+          +*.prx
+          +EBOOT.PBP
+          +PARAM.SFO
+          +/dist
+          diff -ruN a/Makefile.psp b/Makefile.psp
+          --- a/Makefile.psp	1970-01-01 00:00:00.000000000 +0000
+          +++ b/Makefile.psp	2026-10-30 11:26:02.250758265 +0000
+          @@ -0,0 +1,50 @@
+          +# Caprice32 for PSP (pspdev toolchain + SDL2).
+          +#   make -f Makefile.psp            -> EBOOT.PBP
+          +#   make -f Makefile.psp package    -> dist/Caprice32 (copy to ms0:/PSP/GAME/)
+          +TARGET = Caprice32
+          +
+          +# Core emulator + IPF (CAPSImg) minus: wGui (src/gui), Net4CPC (stubbed in psp/).
+          +SRCS_CORE = $(filter-out src/net4cpc.cpp,$(wildcard src/*.cpp)) $(wildcard src/capsimg/*/*.cpp)
+          +SRCS_PSP  = psp/main_psp.cpp psp/psp_ui.cpp psp/net4cpc_stub.cpp
+          +OBJS = $(SRCS_CORE:.cpp=.o) $(SRCS_PSP:.cpp=.o)
+          +
+          +INCDIR = . src psp src/capsimg/LibIPF src/capsimg/Device src/capsimg/CAPSImg src/capsimg/Codec src/capsimg/Core
+          +CFLAGS = -O2 -G0 -ffast-math -fno-strict-aliasing -fomit-frame-pointer \
+          +         -DCAPRICE_NO_WGUI -DCAPRICE_NO_LOG -DCAPRICE_FAST_VIDEO -DNDEBUG \
+          +         -Wno-write-strings
+          +CXXFLAGS = $(CFLAGS) -std=gnu++17
+          +ASFLAGS = $(CFLAGS)
+          +
+          +PSP_FW_VERSION = 661
+          +BUILD_PRX = 1
+          +PSP_LARGE_MEMORY = 0
+          +
+          +# sdl2-config (installed by the sdl2 psp-package) knows the exact link line.
+          +SDL2_CFLAGS := $(shell $(shell psp-config --psp-prefix)/bin/sdl2-config --cflags 2>/dev/null)
+          +SDL2_LIBS   := $(shell $(shell psp-config --psp-prefix)/bin/sdl2-config --libs 2>/dev/null)
+          +ifeq ($(strip $(SDL2_LIBS)),)
+          +SDL2_CFLAGS = -I$(shell psp-config --psp-prefix)/include/SDL2
+          +SDL2_LIBS = -lSDL2main -lSDL2 -lGL -lGLU -lglut -lz -lpspvfpu -lpsphprm -lpspsdk -lpspumd
+          +endif
+          +CFLAGS += $(SDL2_CFLAGS)
+          +CXXFLAGS += $(SDL2_CFLAGS)
+          +
+          +LIBDIR =
+          +LDFLAGS =
+          +LIBS = $(SDL2_LIBS) -lpng -lz -lm -lpspvram -lpspaudio -lpspctrl -lpsppower -lpspdisplay -lpspge -lpspgu -lpsprtc -lstdc++
+          +
+          +EXTRA_TARGETS = EBOOT.PBP
+          +PSP_EBOOT_TITLE = Caprice32 (Amstrad CPC)
+          +PSP_EBOOT_ICON = psp/ICON0.PNG
+          +
+          +PSPSDK = $(shell psp-config --pspsdk-path)
+          +include $(PSPSDK)/lib/build.mak
+          +
+          +.PHONY: package
+          +package: EBOOT.PBP
+          +	rm -rf dist/Caprice32 && mkdir -p dist/Caprice32/rom dist/Caprice32/disk dist/Caprice32/tape dist/Caprice32/snap dist/Caprice32/cart dist/Caprice32/screenshots
+          +	cp EBOOT.PBP dist/Caprice32/
+          +	cp psp/cap32.cfg dist/Caprice32/cap32.cfg
+          +	cp rom/*.rom rom/*.cpr dist/Caprice32/rom/ 2>/dev/null || true
+          +	cp -r resources dist/Caprice32/resources
+          +	rm -f dist/Caprice32/resources/*.ttf
+          diff -ruN a/psp/cap32.cfg b/psp/cap32.cfg
+          --- a/psp/cap32.cfg	1970-01-01 00:00:00.000000000 +0000
+          +++ b/psp/cap32.cfg	2026-10-30 11:26:02.249509818 +0000
+          @@ -0,0 +1,51 @@
+          +# Caprice32 PSP configuration (read from the folder holding EBOOT.PBP)
+          +[system]
+          +model=2
+          +jumpers=30
+          +ram_size=128
+          +speed=4
+          +auto_pause=0
+          +printer=0
+          +mf2=0
+          +keyboard=0
+          +joysticks=0
+          +joystick_emulation=0
+          +boot_time=42
+          +net4cpc=0
+          +limit_speed=1
+          +
+          +[video]
+          +scr_scale=1
+          +scr_preserve_aspect_ratio=1
+          +# 0 = half size, hardware scaled: the fastest mode
+          +scr_style=0
+          +scr_fps=0
+          +scr_tube=0
+          +scr_intensity=10
+          +scr_window=1
+          +
+          +[sound]
+          +enabled=1
+          +# 22.05 kHz, 16-bit stereo: plenty for the PSP speakers, half the mixing cost
+          +playback_rate=1
+          +bits=1
+          +stereo=1
+          +volume=80
+          +pp_device=0
+          +
+          +[control]
+          +kbd_layout=keymap_us.map
+          +
+          +[file]
+          +max_track_size=5990
+          +snap_path=./snap/
+          +cart_path=./cart/
+          +dsk_path=./disk/
+          +tape_path=./tape/
+          +printer_file=./printer.dat
+          +sdump_dir=./screenshots/
+          +
+          +[rom]
+          +rom_path=./rom
+          +slot07=DEFAULT
+          +rom_mf2=MF2.rom
+          diff -ruN a/psp/main_psp.cpp b/psp/main_psp.cpp
+          --- a/psp/main_psp.cpp	1970-01-01 00:00:00.000000000 +0000
+          +++ b/psp/main_psp.cpp	2026-10-30 11:26:02.248500300 +0000
+          @@ -0,0 +1,41 @@
+          +// PSP entry point. SDL2's PSP backend (libSDL2main) provides the real
+          +// main(), module info and exit callback, then calls SDL_main() below.
+          +#include <SDL_main.h>
+          +
+          +#include <pspkernel.h>
+          +#include <psppower.h>
+          +
+          +#include <cstdlib>
+          +#include <cstring>
+          +#include <string>
+          +#include <unistd.h>
+          +
+          +#include "src/cap32.h"
+          +
+          +// Use (almost) all of the user RAM for malloc: ROMs + 128K CPC RAM + buffers.
+          +PSP_HEAP_SIZE_KB(-1024);
+          +
+          +int main(int argc, char** argv)
+          +{
+          +   // argv[0] is e.g. "ms0:/PSP/GAME/Caprice32/EBOOT.PBP" (or host0:/...).
+          +   std::string dir = "ms0:/PSP/GAME/Caprice32";
+          +   if (argc > 0 && argv && argv[0]) {
+          +      std::string a = argv[0];
+          +      size_t slash = a.find_last_of('/');
+          +      if (slash != std::string::npos && slash > 0) dir = a.substr(0, slash);
+          +   }
+          +   chdir(dir.c_str());
+          +   setenv("HOME", dir.c_str(), 1);
+          +
+          +   // Always run at the PSP's top clock: 333 MHz CPU / 166 MHz bus.
+          +   scePowerSetClockFrequency(333, 333, 166);
+          +
+          +   // Config is cap32.cfg next to the EBOOT (chAppPath = cwd). Passing it
+          +   // explicitly makes the lookup independent of the cwd handling.
+          +   std::string cfg = dir + "/cap32.cfg";
+          +   static char arg0[] = "caprice32";
+          +   static char arg1[] = "-c";
+          +   std::string cfgCopy = cfg;
+          +   char* av[] = { arg0, arg1, &cfgCopy[0], nullptr };
+          +   return cap32_main(3, av);
+          +}
+          diff -ruN a/psp/net4cpc_stub.cpp b/psp/net4cpc_stub.cpp
+          --- a/psp/net4cpc_stub.cpp	1970-01-01 00:00:00.000000000 +0000
+          +++ b/psp/net4cpc_stub.cpp	2026-10-30 11:26:02.249238788 +0000
+          @@ -0,0 +1,6 @@
+          +// Net4CPC needs BSD sockets, which the PSP build does not use.
+          +#include "net4cpc.h"
+          +
+          +void net4cpc_reset() {}
+          +byte net4cpc_in(byte) { return 0xff; }
+          +void net4cpc_out(byte, byte) {}
+          diff -ruN a/psp/psp_ui.cpp b/psp/psp_ui.cpp
+          --- a/psp/psp_ui.cpp	1970-01-01 00:00:00.000000000 +0000
+          +++ b/psp/psp_ui.cpp	2026-10-30 11:26:02.248220341 +0000
+          @@ -0,0 +1,466 @@
+          +// PSP front-end for Caprice32 (SDL2 / pspdev). See psp_ui.h.
+          +#include "psp_ui.h"
+          +
+          +#include <dirent.h>
+          +#include <sys/stat.h>
+          +
+          +#include <algorithm>
+          +#include <cctype>
+          +#include <strings.h>
+          +#include <cstdlib>
+          +#include <cstring>
+          +#include <list>
+          +#include <string>
+          +#include <vector>
+          +
+          +#include "SDL.h"
+          +
+          +#include "cap32.h"
+          +#include "keyboard.h"
+          +#include "slotshandler.h"
+          +#include "font.h"  // static bFont[], FNT_* (8x8, ASCII 32..127)
+          +
+          +// Globals owned by cap32.cpp / video.cpp
+          +extern t_CPC CPC;
+          +extern SDL_Renderer* renderer;
+          +extern std::list<SDL_Event> virtualKeyboardEvents;
+          +extern dword nextVirtualEventFrameCount, dwFrameCountOverall;
+          +
+          +namespace {
+          +
+          +// SDL2 PSP joystick button order (SDL_sysjoystick.c in SDL2's PSP backend)
+          +enum PspBtn {
+          +   B_TRIANGLE = 0, B_CIRCLE, B_CROSS, B_SQUARE, B_L, B_R,
+          +   B_DOWN, B_LEFT, B_UP, B_RIGHT, B_SELECT, B_START, B_COUNT = 12
+          +};
+          +
+          +const int SCR_W = 480;
+          +const int SCR_H = 272;
+          +const int AXIS_DEAD = 12000;
+          +
+          +SDL_Joystick* g_joy = nullptr;
+          +bool g_joyTried = false;
+          +bool g_prev[B_COUNT] = {};
+          +
+          +void ensure_joystick()
+          +{
+          +   if (g_joyTried) return;
+          +   g_joyTried = true;
+          +   if (SDL_InitSubSystem(SDL_INIT_JOYSTICK) < 0) return;
+          +   if (SDL_NumJoysticks() > 0) {
+          +      g_joy = SDL_JoystickOpen(0);
+          +      // We poll the state ourselves; keep the event queue free of pad events.
+          +      SDL_JoystickEventState(SDL_IGNORE);
+          +   }
+          +}
+          +
+          +bool btn(int b)
+          +{
+          +   return g_joy && b < SDL_JoystickNumButtons(g_joy) && SDL_JoystickGetButton(g_joy, b);
+          +}
+          +
+          +// ------------------------------------------------------------------ drawing
+          +SDL_Surface* g_ui = nullptr;
+          +SDL_Texture* g_tex = nullptr;
+          +
+          +bool ui_open()
+          +{
+          +   g_ui = SDL_CreateRGBSurface(0, SCR_W, SCR_H, 32, 0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
+          +   if (!g_ui) return false;
+          +   g_tex = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, SCR_W, SCR_H);
+          +   if (!g_tex) { SDL_FreeSurface(g_ui); g_ui = nullptr; return false; }
+          +   ensure_joystick();
+          +   SDL_JoystickUpdate();
+          +   for (int i = 0; i < B_COUNT; i++) g_prev[i] = btn(i);  // swallow the press that opened us
+          +   return true;
+          +}
+          +
+          +void ui_close()
+          +{
+          +   if (g_tex) SDL_DestroyTexture(g_tex);
+          +   if (g_ui) SDL_FreeSurface(g_ui);
+          +   g_tex = nullptr;
+          +   g_ui = nullptr;
+          +}
+          +
+          +Uint32 rgb(Uint8 r, Uint8 g, Uint8 b) { return SDL_MapRGB(g_ui->format, r, g, b); }
+          +
+          +void fill(int x, int y, int w, int h, Uint32 c)
+          +{
+          +   SDL_Rect r = { x, y, w, h };
+          +   SDL_FillRect(g_ui, &r, c);
+          +}
+          +
+          +void text(int x, int y, const std::string& s, Uint32 c, int maxChars = 1000)
+          +{
+          +   int n = 0;
+          +   for (char ch : s) {
+          +      if (n++ >= maxChars) break;
+          +      int idx = static_cast<unsigned char>(ch);
+          +      if (idx < FNT_MIN_CHAR || idx > FNT_MAX_CHAR) idx = FNT_BAD_CHAR + FNT_MIN_CHAR;
+          +      idx -= FNT_MIN_CHAR;
+          +      for (int row = 0; row < FNT_CHAR_HEIGHT; row++) {
+          +         unsigned char bits = bFont[idx + row * FNT_CHARS];
+          +         for (int col = 0; col < FNT_CHAR_WIDTH; col++) {
+          +            if (bits & (0x80 >> col)) fill(x + col, y + row, 1, 1, c);
+          +         }
+          +      }
+          +      x += FNT_CHAR_WIDTH;
+          +   }
+          +}
+          +
+          +void present()
+          +{
+          +   SDL_UpdateTexture(g_tex, nullptr, g_ui->pixels, g_ui->pitch);
+          +   SDL_RenderClear(renderer);
+          +   SDL_RenderCopy(renderer, g_tex, nullptr, nullptr);
+          +   SDL_RenderPresent(renderer);
+          +}
+          +
+          +// Pressed-this-frame edges for all buttons (plus auto-repeat for d-pad).
+          +struct Edges {
+          +   bool p[B_COUNT];
+          +};
+          +
+          +Edges read_edges()
+          +{
+          +   static Uint32 repeatAt[B_COUNT] = {};
+          +   Edges e = {};
+          +   SDL_PumpEvents();
+          +   SDL_Event ev;
+          +   while (SDL_PollEvent(&ev)) {
+          +      if (ev.type == SDL_QUIT) cleanExit(0, false);
+          +   }
+          +   SDL_JoystickUpdate();
+          +   Uint32 now = SDL_GetTicks();
+          +   for (int i = 0; i < B_COUNT; i++) {
+          +      bool down = btn(i);
+          +      if (down && !g_prev[i]) {
+          +         e.p[i] = true;
+          +         repeatAt[i] = now + 350;
+          +      } else if (down && i >= B_DOWN && i <= B_RIGHT && now >= repeatAt[i]) {
+          +         e.p[i] = true;
+          +         repeatAt[i] = now + 80;
+          +      }
+          +      g_prev[i] = down;
+          +   }
+          +   // analog nub acts as d-pad too
+          +   if (g_joy && SDL_JoystickNumAxes(g_joy) >= 2) {
+          +      static int lastDir = 0;
+          +      static Uint32 nextAt = 0;
+          +      int ax = SDL_JoystickGetAxis(g_joy, 0), ay = SDL_JoystickGetAxis(g_joy, 1);
+          +      int dir = 0;
+          +      if (ay > AXIS_DEAD) dir = 1; else if (ay < -AXIS_DEAD) dir = 2;
+          +      else if (ax < -AXIS_DEAD) dir = 3; else if (ax > AXIS_DEAD) dir = 4;
+          +      if (dir && (dir != lastDir || now >= nextAt)) {
+          +         static const int map[5] = { 0, B_DOWN, B_UP, B_LEFT, B_RIGHT };
+          +         e.p[map[dir]] = true;
+          +         nextAt = now + (dir != lastDir ? 350 : 100);
+          +      }
+          +      lastDir = dir;
+          +   }
+          +   return e;
+          +}
+          +
+          +void frame_wait() { SDL_Delay(16); }
+          +
+          +void queue_events(std::list<SDL_Event> evs)
+          +{
+          +   virtualKeyboardEvents.splice(virtualKeyboardEvents.end(), evs);
+          +   nextVirtualEventFrameCount = dwFrameCountOverall;
+          +}
+          +
+          +void type_string(const std::string& s)
+          +{
+          +   queue_events(CPC.InputMapper->StringToEvents(s));
+          +}
+          +
+          +std::string special(CPC_KEYS k)
+          +{
+          +   return std::string("\a") + static_cast<char>(k);
+          +}
+          +
+          +// -------------------------------------------------------------- keyboard UI
+          +struct Key {
+          +   const char* label;
+          +   const char* send;      // plain text to type (nullptr -> use special)
+          +   CPC_KEYS    key;       // used when send == nullptr && !isShift
+          +   bool        isShift;
+          +   int         w;         // width in cells
+          +};
+          +
+          +const int KB_COLS = 12;
+          +#define K(l, s) { l, s, CPC_ESC, false, 1 }
+          +const std::vector<std::vector<Key>> kLayout = {
+          +   { K("1","1"),K("2","2"),K("3","3"),K("4","4"),K("5","5"),K("6","6"),K("7","7"),K("8","8"),K("9","9"),K("0","0"),K("-","-"),K("^","^") },
+          +   { K("q","q"),K("w","w"),K("e","e"),K("r","r"),K("t","t"),K("y","y"),K("u","u"),K("i","i"),K("o","o"),K("p","p"),K("@","@"),K("[","[") },
+          +   { K("a","a"),K("s","s"),K("d","d"),K("f","f"),K("g","g"),K("h","h"),K("j","j"),K("k","k"),K("l","l"),K(";",";"),K(":",":"),K("]","]") },
+          +   { K("z","z"),K("x","x"),K("c","c"),K("v","v"),K("b","b"),K("n","n"),K("m","m"),K(",",","),K(".","."),K("/","/"),K("\\","\\"),K("\"","\"") },
+          +   { { "SHIFT", nullptr, CPC_ESC, true, 2 }, { "SPACE", " ", CPC_ESC, false, 4 },
+          +     { "ENTER", nullptr, CPC_RETURN, false, 2 }, { "DEL", nullptr, CPC_DEL, false, 2 },
+          +     { "ESC", nullptr, CPC_ESC, false, 2 } },
+          +   { { "TAB", nullptr, CPC_TAB, false, 2 }, { "CAPS", nullptr, CPC_CAPSLOCK, false, 2 },
+          +     { "CLR", nullptr, CPC_CLR, false, 2 }, { "UP", nullptr, CPC_CUR_UP, false, 2 },
+          +     { "DOWN", nullptr, CPC_CUR_DOWN, false, 2 }, { "COPY", nullptr, CPC_COPY, false, 2 } },
+          +   { { "LEFT", nullptr, CPC_CUR_LEFT, false, 3 }, { "RIGHT", nullptr, CPC_CUR_RIGHT, false, 3 },
+          +     { "RUN\"", "RUN\"", CPC_ESC, false, 3 }, { "CAT", "CAT\n", CPC_ESC, false, 3 } },
+          +};
+          +#undef K
+          +
+          +char shifted(char c)
+          +{
+          +   if (c >= 'a' && c <= 'z') return static_cast<char>(c - 'a' + 'A');
+          +   switch (c) {
+          +      case '1': return '!'; case '2': return '"'; case '3': return '#'; case '4': return '$';
+          +      case '5': return '%'; case '6': return '&'; case '7': return '\''; case '8': return '(';
+          +      case '9': return ')'; case '0': return '_'; case '-': return '='; case ';': return '+';
+          +      case ':': return '*'; case ',': return '<'; case '.': return '>'; case '/': return '?';
+          +      case '@': return '|'; case '[': return '{'; case ']': return '}'; case '\\': return '`';
+          +      default: return c;
+          +   }
+          +}
+          +
+          +// ---------------------------------------------------------------- file browse
+          +bool has_ext(const std::string& name, const std::vector<std::string>& exts)
+          +{
+          +   size_t dot = name.find_last_of('.');
+          +   if (dot == std::string::npos) return false;
+          +   std::string e = name.substr(dot);
+          +   std::transform(e.begin(), e.end(), e.begin(), [](unsigned char c) { return std::tolower(c); });
+          +   return std::find(exts.begin(), exts.end(), e) != exts.end();
+          +}
+          +
+          +bool is_dir(const std::string& path)
+          +{
+          +   struct stat st;
+          +   return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+          +}
+          +
+          +std::string join(const std::string& dir, const std::string& name)
+          +{
+          +   if (dir.empty() || dir.back() == '/') return dir + name;
+          +   return dir + "/" + name;
+          +}
+          +
+          +std::string parent_of(const std::string& dir)
+          +{
+          +   std::string d = dir;
+          +   while (d.size() > 1 && d.back() == '/') d.pop_back();
+          +   size_t p = d.find_last_of('/');
+          +   if (p == std::string::npos) return d;
+          +   if (p == 0) return "/";
+          +   std::string up = d.substr(0, p);
+          +   // Keep a device prefix like "ms0:" as "ms0:/"
+          +   if (up.find('/') == std::string::npos && !up.empty() && up.back() == ':') up += "/";
+          +   return up;
+          +}
+          +
+          +// Returns the chosen file path, or "" when cancelled.
+          +std::string browse(const std::string& title, std::string dir, const std::vector<std::string>& exts)
+          +{
+          +   if (dir.empty() || !is_dir(dir)) dir = ".";
+          +   int sel = 0, top = 0;
+          +   std::vector<std::pair<std::string, bool>> items;  // name, isDir
+          +   bool reload = true;
+          +   const int rows = 20;
+          +   const Uint32 cBg = rgb(10, 10, 40), cFg = rgb(220, 220, 220), cSel = rgb(255, 255, 0), cDir = rgb(120, 200, 255);
+          +   while (true) {
+          +      if (reload) {
+          +         items.clear();
+          +         items.push_back({ "..", true });
+          +         std::vector<std::pair<std::string, bool>> found;
+          +         if (DIR* d = opendir(dir.c_str())) {
+          +            while (dirent* de = readdir(d)) {
+          +               std::string n = de->d_name;
+          +               if (n == "." || n == "..") continue;
+          +               bool dd = is_dir(join(dir, n));
+          +               if (dd || has_ext(n, exts)) found.push_back({ n, dd });
+          +            }
+          +            closedir(d);
+          +         }
+          +         std::sort(found.begin(), found.end(), [](const auto& a, const auto& b) {
+          +            if (a.second != b.second) return a.second > b.second;
+          +            return strcasecmp(a.first.c_str(), b.first.c_str()) < 0;
+          +         });
+          +         items.insert(items.end(), found.begin(), found.end());
+          +         sel = 0; top = 0; reload = false;
+          +      }
+          +      Edges e = read_edges();
+          +      int n = static_cast<int>(items.size());
+          +      if (e.p[B_UP] && sel > 0) sel--;
+          +      if (e.p[B_DOWN] && sel < n - 1) sel++;
+          +      if (e.p[B_LEFT]) sel = std::max(0, sel - rows);
+          +      if (e.p[B_RIGHT]) sel = std::min(n - 1, sel + rows);
+          +      if (e.p[B_CIRCLE] || e.p[B_TRIANGLE]) return "";
+          +      if (e.p[B_CROSS]) {
+          +         if (items[sel].first == "..") { dir = parent_of(dir); reload = true; }
+          +         else if (items[sel].second) { dir = join(dir, items[sel].first); reload = true; }
+          +         else return join(dir, items[sel].first);
+          +      }
+          +      if (sel < top) top = sel;
+          +      if (sel >= top + rows) top = sel - rows + 1;
+          +
+          +      fill(0, 0, SCR_W, SCR_H, cBg);
+          +      text(4, 2, title, cSel);
+          +      text(4, 12, dir, cDir, 58);
+          +      for (int i = 0; i < rows && top + i < n; i++) {
+          +         const auto& it = items[top + i];
+          +         std::string line = (it.second ? "[" + it.first + "]" : it.first);
+          +         text(8, 26 + i * 11, (top + i == sel ? "> " : "  ") + line, top + i == sel ? cSel : (it.second ? cDir : cFg), 56);
+          +      }
+          +      text(4, SCR_H - 10, "X:select  O:back  d-pad:move", rgb(150, 150, 150));
+          +      present();
+          +      frame_wait();
+          +   }
+          +}
+          +
+          +}  // namespace
+          +
+          +// ============================================================== public API
+          +PspPadState psp_pad_poll()
+          +{
+          +   ensure_joystick();
+          +   PspPadState s = { 0, false, false, false };
+          +   if (!g_joy) return s;
+          +   SDL_JoystickUpdate();
+          +   bool cur[B_COUNT];
+          +   for (int i = 0; i < B_COUNT; i++) cur[i] = btn(i);
+          +
+          +   int ax = 0, ay = 0;
+          +   if (SDL_JoystickNumAxes(g_joy) >= 2) {
+          +      ax = SDL_JoystickGetAxis(g_joy, 0);
+          +      ay = SDL_JoystickGetAxis(g_joy, 1);
+          +   }
+          +   if (cur[B_LEFT]  || ax < -AXIS_DEAD) s.mask |= 1u << 0;
+          +   if (cur[B_RIGHT] || ax >  AXIS_DEAD) s.mask |= 1u << 1;
+          +   if (cur[B_UP]    || ay < -AXIS_DEAD) s.mask |= 1u << 2;
+          +   if (cur[B_DOWN]  || ay >  AXIS_DEAD) s.mask |= 1u << 3;
+          +   if (cur[B_CROSS])    s.mask |= 1u << 4;  // fire 1
+          +   if (cur[B_CIRCLE])   s.mask |= 1u << 5;  // fire 2
+          +   if (cur[B_SQUARE])   s.mask |= 1u << 6;  // RETURN
+          +   if (cur[B_TRIANGLE]) s.mask |= 1u << 7;  // SPACE
+          +   if (cur[B_L])        s.mask |= 1u << 8;  // ESC
+          +   s.fast = cur[B_R];
+          +   s.menu = cur[B_START] && !g_prev[B_START];
+          +   s.keyboard = cur[B_SELECT] && !g_prev[B_SELECT];
+          +   for (int i = 0; i < B_COUNT; i++) g_prev[i] = cur[i];
+          +   return s;
+          +}
+          +
+          +void psp_ui_keyboard()
+          +{
+          +   if (!ui_open()) return;
+          +   int row = 1, col = 0;
+          +   bool shift = false;
+          +   const int cw = SCR_W / KB_COLS, ch = 26;
+          +   const Uint32 cBg = rgb(10, 10, 40), cKey = rgb(60, 60, 110), cSel = rgb(255, 200, 0), cTxt = rgb(255, 255, 255);
+          +   bool done = false;
+          +   while (!done) {
+          +      Edges e = read_edges();
+          +      auto cellX = [&](int r, int c) { int x = 0; for (int i = 0; i < c; i++) x += kLayout[r][i].w; return x; };
+          +      // keep column inside the new row, based on x position
+          +      auto clampCol = [&](int r, int oldX) {
+          +         int best = 0;
+          +         for (int i = 0; i < static_cast<int>(kLayout[r].size()); i++) if (cellX(r, i) <= oldX) best = i;
+          +         return best;
+          +      };
+          +      int rows = static_cast<int>(kLayout.size());
+          +      if (e.p[B_UP] && row > 0)        { int x = cellX(row, col); row--; col = clampCol(row, x); }
+          +      if (e.p[B_DOWN] && row < rows-1) { int x = cellX(row, col); row++; col = clampCol(row, x); }
+          +      if (e.p[B_LEFT] && col > 0) col--;
+          +      if (e.p[B_RIGHT] && col < static_cast<int>(kLayout[row].size()) - 1) col++;
+          +      if (e.p[B_CIRCLE] || e.p[B_START] || e.p[B_SELECT]) done = true;
+          +      if (e.p[B_SQUARE]) type_string(special(CPC_DEL));
+          +      if (e.p[B_TRIANGLE]) type_string(" ");
+          +      if (e.p[B_CROSS]) {
+          +         const Key& k = kLayout[row][col];
+          +         if (k.isShift) shift = !shift;
+          +         else if (k.send) {
+          +            std::string s = k.send;
+          +            if (shift && s.size() == 1) s[0] = shifted(s[0]);
+          +            type_string(s);
+          +            shift = false;
+          +         } else {
+          +            type_string(special(k.key));
+          +         }
+          +      }
+          +
+          +      fill(0, 0, SCR_W, SCR_H, cBg);
+          +      text(4, 4, "CPC keyboard   X:type  []:DEL  /\\:SPACE  O/SELECT:close", rgb(150, 150, 150));
+          +      const int y0 = 28;
+          +      for (int r = 0; r < rows; r++) {
+          +         int x = 0;
+          +         for (int c = 0; c < static_cast<int>(kLayout[r].size()); c++) {
+          +            const Key& k = kLayout[r][c];
+          +            int w = k.w * cw;
+          +            bool sel = (r == row && c == col);
+          +            bool lit = k.isShift && shift;
+          +            fill(x + 1, y0 + r * (ch + 4) - 1, w - 2, ch + 2, sel ? cSel : (lit ? rgb(0, 160, 0) : cKey));
+          +            fill(x + 3, y0 + r * (ch + 4) + 1, w - 6, ch - 2, sel ? rgb(90, 70, 0) : (lit ? rgb(0, 100, 0) : cBg));
+          +            std::string lab = k.label;
+          +            if (shift && !k.isShift && k.send && std::strlen(k.send) == 1 && lab.size() == 1) lab = std::string(1, shifted(lab[0]));
+          +            int tx = x + (w - static_cast<int>(lab.size()) * 8) / 2;
+          +            text(tx, y0 + r * (ch + 4) + ch / 2 - 3, lab, cTxt);
+          +            x += w;
+          +         }
+          +      }
+          +      present();
+          +      frame_wait();
+          +   }
+          +   ui_close();
+          +}
+          +
+          +void psp_ui_menu()
+          +{
+          +   if (!ui_open()) return;
+          +   enum { M_DSKA, M_DSKB, M_TAPE, M_SNAP, M_CART, M_CAT, M_RUN, M_CPM, M_RESET, M_FPS, M_SPEED, M_RESUME, M_EXIT, M_COUNT };
+          +   int sel = 0;
+          +   std::string msg;
+          +   const Uint32 cBg = rgb(10, 10, 40), cFg = rgb(220, 220, 220), cSel = rgb(255, 255, 0);
+          +   bool done = false;
+          +   auto load = [&](t_slot& slot, const std::string& title, const std::string& dir, std::vector<std::string> exts) {
+          +      std::string f = browse(title, dir, exts);
+          +      if (f.empty()) return false;
+          +      slot.file = f;
+          +      slot.zip_index = 0;
+          +      int rc = file_load(slot);
+          +      msg = rc == 0 ? "Loaded: " + f.substr(f.find_last_of('/') + 1) : "Load failed";
+          +      return rc == 0;
+          +   };
+          +   while (!done) {
+          +      Edges e = read_edges();
+          +      if (e.p[B_UP]) sel = (sel + M_COUNT - 1) % M_COUNT;
+          +      if (e.p[B_DOWN]) sel = (sel + 1) % M_COUNT;
+          +      if (e.p[B_CIRCLE] || e.p[B_START]) done = true;
+          +      if (e.p[B_CROSS]) {
+          +         switch (sel) {
+          +            case M_DSKA: if (load(CPC.driveA, "Load disk into drive A", CPC.dsk_path, { ".dsk", ".ipf", ".zip" })) done = true; break;
+          +            case M_DSKB: if (load(CPC.driveB, "Load disk into drive B", CPC.dsk_path, { ".dsk", ".ipf", ".zip" })) done = true; break;
+          +            case M_TAPE: if (load(CPC.tape, "Load tape", CPC.tape_path, { ".cdt", ".voc", ".zip" })) done = true; break;
+          +            case M_SNAP: if (load(CPC.snapshot, "Load snapshot", CPC.snap_path, { ".sna", ".zip" })) done = true; break;
+          +            case M_CART: if (load(CPC.cartridge, "Load cartridge", CPC.cart_path, { ".cpr", ".zip" })) { emulator_reset(); done = true; } break;
+          +            case M_CAT:  type_string("CAT\n"); done = true; break;
+          +            case M_RUN:  type_string("RUN\""); done = true; break;
+          +            case M_CPM:  type_string("|CPM\n"); done = true; break;
+          +            case M_RESET: emulator_reset(); done = true; break;
+          +            case M_FPS:   CPC.scr_fps = CPC.scr_fps ? 0 : 1; msg = CPC.scr_fps ? "FPS counter on" : "FPS counter off"; break;
+          +            case M_SPEED: CPC.limit_speed = CPC.limit_speed ? 0 : 1; msg = CPC.limit_speed ? "Speed limit on" : "Speed limit off"; break;
+          +            case M_RESUME: done = true; break;
+          +            case M_EXIT: ui_close(); cleanExit(0, false); return;
+          +         }
+          +      }
+          +      static const char* labels[M_COUNT] = {
+          +         "Load disk -> drive A", "Load disk -> drive B", "Load tape (CDT/VOC)", "Load snapshot (SNA)",
+          +         "Load cartridge (CPR, 6128+)", "Type: CAT", "Type: RUN\"", "Type: |CPM",
+          +         "Reset CPC", "Toggle FPS counter", "Toggle speed limit", "Resume", "Quit Caprice32" };
+          +      fill(0, 0, SCR_W, SCR_H, cBg);
+          +      text(4, 4, "Caprice32 PSP", cSel);
+          +      for (int i = 0; i < M_COUNT; i++)
+          +         text(24, 24 + i * 14, std::string(i == sel ? "> " : "  ") + labels[i], i == sel ? cSel : cFg);
+          +      text(4, SCR_H - 34, msg, rgb(120, 255, 120), 58);
+          +      text(4, SCR_H - 10, "X:ok  O/START:close   in game: SELECT=keyboard  R=turbo", rgb(150, 150, 150));
+          +      present();
+          +      frame_wait();
+          +   }
+          +   ui_close();
+          +}
+          diff -ruN a/psp/psp_ui.h b/psp/psp_ui.h
+          --- a/psp/psp_ui.h	1970-01-01 00:00:00.000000000 +0000
+          +++ b/psp/psp_ui.h	2026-10-30 11:26:02.246586272 +0000
+          @@ -0,0 +1,22 @@
+          +// PSP front-end for Caprice32: pad handling, on-screen CPC keyboard and a
+          +// small menu (load disk/tape/snapshot/cartridge, reset, quit...).
+          +#ifndef PSP_UI_H
+          +#define PSP_UI_H
+          +
+          +struct PspPadState {
+          +   // bit 0 left, 1 right, 2 up, 3 down (CPC joystick 0), 4 fire1, 5 fire2,
+          +   // 6 RETURN, 7 SPACE, 8 ESC
+          +   unsigned int mask;
+          +   bool fast;      // R held: run without speed limit
+          +   bool menu;      // START pressed this poll (edge)
+          +   bool keyboard;  // SELECT pressed this poll (edge)
+          +};
+          +
+          +// Polls the pad (opens it on first call). Cheap; call once per emulator pass.
+          +PspPadState psp_pad_poll();
+          +// Modal on-screen keyboard. Typed keys are queued in virtualKeyboardEvents.
+          +void psp_ui_keyboard();
+          +// Modal menu.
+          +void psp_ui_menu();
+          +
+          +#endif
+          diff -ruN a/src/cap32.cpp b/src/cap32.cpp
+          --- a/src/cap32.cpp	2026-10-18 07:29:52.000000000 +0000
+          +++ b/src/cap32.cpp	2026-10-30 11:26:02.190959313 +0000
+          @@ -60,11 +60,21 @@
+           #include "CapriceGuiView.h"
+           #include "CapriceVKeyboardView.h"
+           #include "CapriceLeavingWithoutSavingView.h"
+          +#elif defined(__PSP__)
+          +// PSP: on-screen keyboard / menu / pad handling (see psp/psp_ui.cpp).
+          +#include "psp/psp_ui.h"
+           #else
+           // iOS: native UIKit on-screen CPC keyboard (see CPCVirtualKeyboard.mm).
+           #include "CPCVirtualKeyboardBridge.h"
+           #endif
+
+          +// Sleeping helper: newlib on PSP has no usable std::this_thread::sleep_for.
+          +#ifdef __PSP__
+          +#define CAP32_SLEEP_MS(ms) SDL_Delay(static_cast<Uint32>(ms))
+          +#else
+          +#define CAP32_SLEEP_MS(ms) std::this_thread::sleep_for(std::chrono::milliseconds(ms))
+          +#endif
+          +
+           #include "errors.h"
+           #include "log.h"
+
+          @@ -2047,6 +2057,12 @@
+              CPC.joystick_emulation = JoystickEmulation::Keyboard;
+           #endif
+              CPC.joysticks = conf.getIntValue("system", "joysticks", 1) & 1;
+          +#ifdef __PSP__
+          +   // The PSP pad is polled directly by psp/psp_ui.cpp (D-pad + analog nub +
+          +   // buttons -> CPC joystick/keys); SDL joystick events must not also fire.
+          +   CPC.joysticks = 0;
+          +   CPC.joystick_emulation = JoystickEmulation::None;
+          +#endif
+              // Both fields are unsigned int (cap32.h). getIntValue()-1 on a config
+              // value of 0 (a hand-edited/corrupt cap32.cfg, or any future caller
+              // that writes 0 here) underflows to 4294967295 instead of a sane
+          @@ -2371,6 +2387,21 @@
+           // the joystick vkeyboard button toggle the native UIKit overlay
+           // (CPCVirtualKeyboard.mm). It injects SDL key events by itself, so no
+           // modal loop / surface bookkeeping is needed here.
+          +#ifdef __PSP__
+          +void showVKeyboard()
+          +{
+          +   auto guiBackSurface = prepareShowUI();
+          +   psp_ui_keyboard();
+          +   cleanupShowUI(guiBackSurface);
+          +}
+          +
+          +void showGui()
+          +{
+          +   auto guiBackSurface = prepareShowUI();
+          +   psp_ui_menu();
+          +   cleanupShowUI(guiBackSurface);
+          +}
+          +#else
+           void showVKeyboard()
+           {
+              CPCVKbd_Toggle();
+          @@ -2381,6 +2412,7 @@
+              auto guiBackSurface = prepareShowUI();
+              cleanupShowUI(guiBackSurface);
+           }
+          +#endif
+
+           #endif  // CAPRICE_NO_WGUI
+
+          @@ -3052,6 +3084,11 @@
+                // a real argv[0] path, or "." as a dirty fallback if resolution
+                // fails (binPath is only used for bundles anyway, where argv[0]
+                // found via PATH lookup isn't the case).
+          +#ifdef __PSP__
+          +     // No realpath() in the PSP newlib: main_psp.cpp already chdir()'d to the
+          +     // directory holding EBOOT.PBP, so "." is exactly that directory.
+          +     binPath = ".";
+          +#else
+                char resolved[PATH_MAX];
+                std::string toResolve = argv[0];
+                size_t lastSlash = toResolve.find_last_of('/');
+          @@ -3064,6 +3101,7 @@
+                } else {
+                  binPath = ".";
+                }
+          +#endif
+              }
+              parseArguments(argc, argv, slot_list, args);
+
+          @@ -3085,7 +3123,9 @@
+              // diagnostics. Setting this hint before SDL_Init() makes SDL2 skip
+              // straight to the "opengles2" driver, which is what every one of
+              // these chips actually supports.
+          +#ifndef __PSP__
+              SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengles2");
+          +#endif
+
+              if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER | SDL_INIT_NOPARACHUTE) < 0) { // initialize SDL
+                 fprintf(stderr, "SDL_Init() failed: %s\n", SDL_GetError());
+          @@ -3135,7 +3175,7 @@
+              }
+              fprintf(stderr, "TRACE: after video_init, before mouse_init\n"); fflush(stderr);
+              CRASH_CHECKPOINT("after video_init, before mouse_init");
+          -#ifdef CAPRICE_NO_WGUI
+          +#if defined(CAPRICE_NO_WGUI) && !defined(__PSP__)
+              // iOS: SDL's UIKit window exists now, so the overlay stacks above it.
+              CPCVKbd_Install();
+           #endif
+          @@ -3262,6 +3302,35 @@
+                   applyKeypress(CPC.InputMapper->CPCscancodeFromCPCkey(CPC_J0_DOWN), keyboard_matrix, false, false);
+                   applyKeypress(CPC.InputMapper->CPCscancodeFromCPCkey(CPC_J0_UP), keyboard_matrix, false, false);
+                 }
+          +#ifdef __PSP__
+          +      {
+          +         // PSP buttons -> CPC joystick 0 / keys. Written straight into the
+          +         // keyboard matrix every pass (like a hardware gamepad) so a held
+          +         // direction can never get lost in the SDL event queue.
+          +         PspPadState pad = psp_pad_poll();
+          +         if (!CPC.paused) {
+          +            static const CPC_KEYS padKeys[9] = { CPC_J0_LEFT, CPC_J0_RIGHT, CPC_J0_UP, CPC_J0_DOWN,
+          +                                                 CPC_J0_FIRE1, CPC_J0_FIRE2,
+          +                                                 CPC_RETURN, CPC_SPACE, CPC_ESC };
+          +            static unsigned int appliedMask = 0;
+          +            for (int i = 0; i < 9; i++) {
+          +               bool want = (pad.mask >> i) & 1;
+          +               bool had = (appliedMask >> i) & 1;
+          +               if (want == had) continue;
+          +               CPCScancode sc = CPC.InputMapper->CPCscancodeFromCPCkey(padKeys[i]);
+          +               if (sc == 0xff) continue;
+          +               applyKeypress(sc, keyboard_matrix, want, false);
+          +            }
+          +            appliedMask = pad.mask;
+          +         }
+          +         // Fast-forward while R is held.
+          +         static bool speedWasLimited = false;
+          +         if (pad.fast && CPC.limit_speed) { CPC.limit_speed = 0; speedWasLimited = true; }
+          +         else if (!pad.fast && speedWasLimited) { CPC.limit_speed = 1; speedWasLimited = false; }
+          +         if (pad.menu) showGui();
+          +         if (pad.keyboard) showVKeyboard();
+          +      }
+          +#endif
+           #ifdef CAPRICE_IOS7
+                 {
+                    // On-screen game pad -> CPC joystick 0, written straight into the
+          @@ -3634,7 +3703,7 @@
+                          dwTicks = SDL_GetTicks();
+                          if (dwTicks < dwTicksTarget) { // limit speed ?
+                             if (dwTicksTarget - dwTicks > POLL_INTERVAL_MS) { // No need to burn cycles if next event is far away
+          -                     std::this_thread::sleep_for(std::chrono::milliseconds(POLL_INTERVAL_MS));
+          +                     CAP32_SLEEP_MS(POLL_INTERVAL_MS);
+                             }
+                             continue; // delay emulation
+                          }
+          @@ -3692,7 +3761,7 @@
+                       CRASH_CHECKPOINT_FAST("main loop: before asic_draw_sprites");
+                       asic_draw_sprites();
+                       CRASH_CHECKPOINT_FAST("main loop: before video_display");
+          -#ifdef CAPRICE_IOS7
+          +#if defined(CAPRICE_IOS7) || defined(__PSP__)
+                       {
+                          // Adaptive frameskip (iPad 1 / mini 1). Presenting a frame (texture
+                          // upload + GL present + compositor with the touch overlay) is the most
+          @@ -3724,7 +3793,7 @@
+                    }
+                 }
+                 else { // We are paused. No need to burn CPU cycles
+          -         std::this_thread::sleep_for(std::chrono::milliseconds(POLL_INTERVAL_MS));
+          +         CAP32_SLEEP_MS(POLL_INTERVAL_MS);
+                 }
+              }
+
+          diff -ruN a/src/crashlog.h b/src/crashlog.h
+          --- a/src/crashlog.h	2026-10-18 07:29:52.000000000 +0000
+          +++ b/src/crashlog.h	2026-10-30 11:26:02.200366722 +0000
+          @@ -34,6 +34,22 @@
+           // combined with the existing crash report's stack (same binary offsets)
+           // tells you exactly which C++ statement was executing.
+
+          +#ifdef __PSP__
+          +// PSP: no sigaltstack/siginfo and a slow Memory Stick - the crash trail is
+          +// compiled out and every hook becomes a no-op.
+          +namespace crashlog {
+          +inline void init() {}
+          +inline void checkpoint(const char*) {}
+          +inline void checkpoint_fast(const char*) {}
+          +inline void set_last_pc(unsigned int) {}
+          +inline const char* path() { return ""; }
+          +}
+          +#define CRASH_CHECKPOINT(msg) ((void)0)
+          +#define CRASH_CHECKPOINT_FAST(msg) ((void)0)
+          +#define CRASHLOG_FAST(msg) ((void)0)
+          +#define CRASHLOG_SET_PC(pc) ((void)0)
+          +#else  // !__PSP__
+          +
+           #include <atomic>
+           #include <cstring>
+           #include <cstdlib>
+          @@ -363,4 +379,6 @@
+           #define CRASHLOG_SET_PC(pc) ((void)0)
+           #endif
+
+          +#endif  // __PSP__
+          +
+           #endif
+          diff -ruN a/src/ipf.cpp b/src/ipf.cpp
+          --- a/src/ipf.cpp	2026-10-18 07:29:52.000000000 +0000
+          +++ b/src/ipf.cpp	2026-10-30 11:26:02.218248683 +0000
+          @@ -3,7 +3,7 @@
+
+           #ifdef WINDOWS
+           #include <windows.h>
+          -#else
+          +#elif !defined(__PSP__)
+           #include <dlfcn.h>
+           #endif
+
+          PSP_PATCH_EOF
+          git apply --whitespace=nowarn -v /tmp/port.diff
+          echo "iVBORw0KGgoAAAANSUhEUgAAAJAAAABQCAIAAAB5zGtbAAABGklEQVR4nO3YIQ6AMBQFwR4Cje6ZODHHwqKLYZtJvp82696451y447wWjvXdGrt+bFdLsJglWMwSLGYJFrMEi1mCxSzBYpZgMWv8/4ms9wkWswSLWYLFLMFilmAxS7CYJVjMEixmCRazTFMxS7CYJVjMEixmCRazBItZgsUswWKWYDFLsJhlmopZgsUswWKWYDFLsJglWMwSLGYJFrMEi1mCxSzTVMwSLGYJFrMEi1mCxSzBYpZgMUuwmCVYzBIsZpmmYpZgMUuwmCVYzBIsZgkWswSLWYLFLMFilmAxyzQVswSLWYLFLMFilmAxS7CYJVjMEixmCRazBItZpqmYJVjMEixmCRazBItZgsUswWKWYDFLsJglWMx6AF9e7B2AXJlMAAAAAElFTkSuQmCC" | base64 -d > psp/ICON0.PNG
+
+      - name: Install PSP libraries
+        run: |
+          psp-pacman -Sy --needed --noconfirm sdl2 libpng zlib
+
+      - name: Build
+        run: |
+          make -f Makefile.psp -j"$(nproc)" package
+
+      - name: Upload Caprice32 folder
+        uses: actions/upload-artifact@v4
+        with:
+          name: Caprice32-PSP
+          # copy this folder to ms0:/PSP/GAME/ on the Memory Stick
+          path: dist/
+
+      - name: Attach to release
+        if: github.event_name == 'release'
+        run: |
+          apt-get update -qq && apt-get install -y -qq zip >/dev/null
+          (cd dist && zip -r ../Caprice32-PSP.zip Caprice32)
+          gh release upload "${{ github.event.release.tag_name }}" Caprice32-PSP.zip --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
