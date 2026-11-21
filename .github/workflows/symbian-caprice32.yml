@@ -906,8 +906,23 @@ jobs:
               if (iStartCb) { iStartCb->Cancel(); }
               caplog("EXIT: stop nested wait");
               if (iWait.IsStarted()) { iWait.AsyncStop(); }
-              caplog("EXIT: ShutdownGl");
-              ShutdownGl();
+              caplog_i("EXIT: foreground flag", (int)iForeground);
+              if (iForeground)
+                  {
+                  caplog("EXIT: ShutdownGl");
+                  ShutdownGl();
+                  }
+              else
+                  {
+                  // The exit command came while the app was in the background (task switcher / red key).  The GPU surface
+                  // is not ours then and any GL/EGL call can hang or crash the driver, so touch no GL at all: the kernel
+                  // frees the context when the process ends.
+                  caplog("EXIT: in background, GL teardown skipped on purpose");
+                  delete iOvlGc;  iOvlGc = NULL;
+                  delete iOvlDev; iOvlDev = NULL;
+                  delete iOvlBmp; iOvlBmp = NULL;
+                  iGlState = 2;
+                  }
               caplog("EXIT: hide window");
               MakeVisible(EFalse);
               caplog("EXIT: WsSession flush");
