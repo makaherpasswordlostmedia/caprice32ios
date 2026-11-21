@@ -184,6 +184,7 @@ jobs:
               ~CCapContainer();
               void SetForeground(TBool aForeground);
               void RequestQuit();
+              void PrepareExit();                  // release GL / audio / window before the process is killed
 
               // CCoeControl
               void Draw(const TRect& aRect) const;
@@ -888,6 +889,41 @@ jobs:
               cap32_main_c(argc, argv);
               caplog("RunEmulator: cap32_main_c returned");
               User::Exit(0);
+              }
+
+          void CCapContainer::PrepareExit()
+              {
+              // The core calls exit() from inside the emulator loop, which ends in User::Exit().  Killing the process
+              // with a live EGL context/surface and an open audio stream crashes on exit (the log stops right after
+              // "plat_exit"), so release them first, in the right order.
+              caplog("EXIT: PrepareExit begin");
+              iQuit = ETrue;
+              caplog("EXIT: cancel pump timer");
+              if (iPumpTimer) { iPumpTimer->Cancel(); }
+              caplog("EXIT: cancel pump idle");
+              if (iPumpIdle) { iPumpIdle->Cancel(); }
+              caplog("EXIT: cancel start callback");
+              if (iStartCb) { iStartCb->Cancel(); }
+              caplog("EXIT: stop nested wait");
+              if (iWait.IsStarted()) { iWait.AsyncStop(); }
+              caplog("EXIT: ShutdownGl");
+              ShutdownGl();
+              caplog("EXIT: hide window");
+              MakeVisible(EFalse);
+              caplog("EXIT: WsSession flush");
+              CEikonEnv* env = CEikonEnv::Static();
+              if (env) { env->WsSession().Flush(); }
+              caplog("EXIT: PrepareExit done");
+              }
+
+          extern "C" void lite_app_teardown(void)
+              {
+              caplog("EXIT: teardown begin");
+              if (gCapAudio) { caplog("EXIT: closing audio"); delete gCapAudio; gCapAudio = NULL; caplog("EXIT: audio closed"); }
+              else { caplog("EXIT: audio already closed"); }
+              if (gCapContainer) { gCapContainer->PrepareExit(); }
+              else { caplog("EXIT: no container"); }
+              caplog("EXIT: teardown end");
               }
 
           void CCapContainer::RequestQuit()
@@ -1732,10 +1768,19 @@ jobs:
               return s.Int();
               }
 
+          extern "C" void lite_app_teardown(void);
+
           void plat_exit(int code)
               {
-              caplog_i("plat_exit (core asked to terminate), code", code);
+              static int sExiting = 0;
+              if (sExiting) { User::Exit(code); }     // re-entered (abort/exit during teardown): just go
+              sExiting = 1;
+              caplog_i("EXIT: plat_exit (core asked to terminate), code", code);
               caplog_mem("at exit");
+              lite_app_teardown();
+              caplog("EXIT: settle 100 ms");
+              User::After(TTimeIntervalMicroSeconds32(100000));   // let the window server / GPU driver settle
+              caplog("EXIT: calling User::Exit now (if this is the last line, the crash is in process termination; see the WD lines in this log)");
               User::Exit(code);
               }
 
@@ -3552,14 +3597,21 @@ jobs:
 
           static void DestroyEgl()
               {
+              caplog("EXIT: DestroyEgl begin");
               if (gDpy)
                   {
-                  eglMakeCurrent(gDpy, 0, 0, 0);
-                  if (gSurf) { eglDestroySurface(gDpy, gSurf); }
-                  if (gCtx) { eglDestroyContext(gDpy, gCtx); }
-                  eglTerminate(gDpy);
+                  caplog_x("EXIT: eglGetError before teardown", (unsigned int)eglGetError());
+                  caplog("EXIT: eglMakeCurrent(none)");
+                  caplog_i("EXIT: eglMakeCurrent returned", (int)eglMakeCurrent(gDpy, 0, 0, 0));
+                  caplog_x("EXIT: eglGetError", (unsigned int)eglGetError());
+                  if (gSurf) { caplog("EXIT: eglDestroySurface"); caplog_i("EXIT: eglDestroySurface returned", (int)eglDestroySurface(gDpy, gSurf)); caplog_x("EXIT: eglGetError", (unsigned int)eglGetError()); }
+                  if (gCtx) { caplog("EXIT: eglDestroyContext"); caplog_i("EXIT: eglDestroyContext returned", (int)eglDestroyContext(gDpy, gCtx)); caplog_x("EXIT: eglGetError", (unsigned int)eglGetError()); }
+                  caplog("EXIT: eglTerminate");
+                  caplog_i("EXIT: eglTerminate returned", (int)eglTerminate(gDpy));
+                  caplog_x("EXIT: eglGetError", (unsigned int)eglGetError());
                   }
               gDpy = 0; gSurf = 0; gCtx = 0;
+              caplog("EXIT: DestroyEgl done");
               }
 
           int cgl_init(void* aNativeWindow, int aW, int aH)
@@ -3649,12 +3701,11 @@ jobs:
 
           void cgl_shutdown(void)
               {
-              if (gCtx)
-                  {
-                  if (gTexFrame) { glDeleteTextures(1, &gTexFrame); }
-                  if (gTexOvl) { glDeleteTextures(1, &gTexOvl); }
-                  if (gProg) { glDeleteProgram(gProg); }
-                  }
+              caplog("EXIT: cgl_shutdown begin");
+              // The 2011 PowerVR driver on the C7 dies inside glDeleteTextures/glDeleteProgram at exit (the log stops
+              // right after "deleting GL textures/program").  eglDestroyContext releases every texture and program of the
+              // context anyway, so the explicit deletes are skipped: just drop the names.
+              caplog("EXIT: skipping glDelete* (eglDestroyContext frees them)");
               gTexFrame = gTexOvl = gProg = 0;
               DestroyEgl();
               }
@@ -3779,6 +3830,7 @@ jobs:
           static TFileName gPath;
           static TFileName gDir;                  // folder of the log
           static volatile TUint gProgress = 0;    // incremented by the main thread while it is alive
+          static volatile TUint gExitTick = 0;    // tick of the last "EXIT:" line (0 = not exiting); the watchdog samples the main thread if it goes quiet
 
           static void OpenLog()
               {
@@ -3787,6 +3839,7 @@ jobs:
               gStart = User::NTickCount();
               gLast[0] = 0;
               if (gFs.Connect() != KErrNone) { return; }
+              gFs.ShareAuto();                                // the watchdog thread writes into the same log file
               _LIT(KD1, "E:\\caprice32\\");
               _LIT(KD2, "F:\\caprice32\\");
               _LIT(KD3, "C:\\Data\\caprice32\\");
@@ -3845,9 +3898,11 @@ jobs:
               OpenLog();
               Remember(aMsg);
               if (!gOpen) { return; }
-              if (gLines > 800)                                    // a runaway checkpoint must not fill the card
+              TBool exitLine = aMsg && aMsg[0] == 'E' && aMsg[1] == 'X' && aMsg[2] == 'I' && aMsg[3] == 'T';
+              if (exitLine) { gExitTick = User::NTickCount() | 1; }
+              if (gLines > 2500 && !exitLine)                      // a runaway checkpoint must not fill the card
                   {
-                  if (gLines == 801) { ++gLines; Put(_L8("--- log truncated ---\r\n")); }
+                  if (gLines == 2501) { ++gLines; Put(_L8("--- log truncated ---\r\n")); }
                   return;
                   }
               ++gLines;
@@ -3948,8 +4003,8 @@ jobs:
           static void WdPut(RFile& aF, const TDesC8& aBody)
               {
               TBuf8<400> l;
-              l.Append('[');
-              l.AppendNum((TInt)(User::NTickCount() - gWdStart));
+              l.Append(_L8("[WD "));
+              l.AppendNum((TInt)(User::NTickCount() - gStart));
               l.Append(_L8("ms] "));
               l.Append(aBody.Left(360));
               l.Append(_L8("\r\n"));
@@ -4047,20 +4102,64 @@ jobs:
 
           static TInt WatchdogMain(TAny*)
               {
-              RFs fs;
-              if (fs.Connect() != KErrNone) { return 0; }
-              RFile f;
-              TFileName path(gDir);
-              path.Append(_L("cap32_wd.txt"));
-              if (f.Replace(fs, path, EFileWrite | EFileShareAny) != KErrNone) { fs.Close(); return 0; }
+              RFile f = gFile;                                    // same file as the main log (one log only)
+              if (!gOpen) { return 0; }
               gWdStart = User::NTickCount();
               TUint last = gProgress;
               TInt stuck = 0, lines = 0, tick = 0, reports = 0;
               WdWrite(f, "watchdog started, progress", (TInt)last, gFast, gLast);
+              // Death monitor: learn HOW the main thread ended (Kill / Terminate / Panic + category + reason).
+              RThread mainTh;
+              TRequestStatus died;
+              died = KRequestPending;
+              TBool watch = (mainTh.Open(gMainId) == KErrNone);
+              if (watch) { mainTh.Logon(died); WdPut(f, _L8("death monitor armed on the main thread")); }
+              RTimer tm;
+              TBool haveTm = (tm.CreateLocal() == KErrNone);
               for (;;)
                   {
-                  User::After(1000000);
+                  if (haveTm)
+                      {
+                      TRequestStatus ts;
+                      tm.After(ts, gExitTick ? 500000 : 1000000);
+                      if (watch) { User::WaitForRequest(ts, died); } else { User::WaitForRequest(ts); }
+                      if (watch && died != KRequestPending)
+                          {
+                          tm.Cancel(); User::WaitForRequest(ts);
+                          TBuf8<260> b;
+                          TExitType et = mainTh.ExitType();
+                          b.Append(_L8("MAIN THREAD ENDED: type="));
+                          b.AppendNum((TInt)et);
+                          if (et == EExitKill) { b.Append(_L8(" (Kill)")); }
+                          else if (et == EExitTerminate) { b.Append(_L8(" (Terminate)")); }
+                          else if (et == EExitPanic) { b.Append(_L8(" (PANIC)")); }
+                          else { b.Append(_L8(" (?)")); }
+                          b.Append(_L8(" reason=")); b.AppendNum(mainTh.ExitReason());
+                          b.Append(_L8(" category="));
+                          TBuf8<80> cat; cat.Copy(mainTh.ExitCategory().Left(60)); b.Append(cat);
+                          b.Append(_L8(" logon-status=")); b.AppendNum(died.Int());
+                          WdPut(f, b);
+                          WdWrite(f, "at main thread end, progress", (TInt)gProgress, gFast, gLast);
+                          mainTh.Close();
+                          return 0;
+                          }
+                      }
+                  else { User::After(1000000); }
                   ++tick;
+                  // exit watch: the main thread stopped logging EXIT: lines for 1.5 s = it is stuck (or crashing) inside the
+                  // last step.  Dump where it is, once per quiet period.
+                  {
+                  static TUint reportedFor = 0;
+                  TUint et = gExitTick;
+                  if (et && et != reportedFor && (User::NTickCount() - et) > 1500)
+                      {
+                      reportedFor = et;
+                      WdWrite(f, "EXIT QUIET for ms, main thread stuck after the last EXIT line", (TInt)(User::NTickCount() - et), gFast, gLast);
+                      DumpLibs(f);
+                      for (TInt k = 0; k < 3; ++k) { SampleMain(f, 100 + k, k == 0); User::After(150000); }
+                      WdPut(f, _L8("EXIT dump done (PC/LR/stack above; match with the cap32-symbols artifact)"));
+                      }
+                  }
                   TUint now = gProgress;
                   if (now == last)
                       {
@@ -4096,10 +4195,10 @@ jobs:
               RThread t;
               TInt e = t.Create(_L("cap32wd"), WatchdogMain, 0x2000, 0x4000, 0x20000, NULL);
               if (e != KErrNone) { caplog_i("watchdog thread failed", e); return; }
-              t.SetPriority(EPriorityNormal);
+              t.SetPriority(EPriorityMore);        // must get to run when the main thread dies
               t.Resume();
               t.Close();
-              caplog("watchdog thread started (cap32_wd.txt)");
+              caplog("watchdog thread started (lines marked WD, same log)");
               }
 
           static void ExcHandler(TExcType aType)
@@ -4245,6 +4344,7 @@ jobs:
           void lite_post_key(int down, int scancode, int keycode, int mod);
           void lite_post_window(int eventId);         /* SDL_WINDOWEVENT_* */
           void lite_post_quit(void);
+          void lite_app_teardown(void);               /* front end: release GL/audio/window before the process ends */
           /* defined in cap32.cpp (CAPRICE_IOS7 pad): bit0 left, 1 right, 2 up, 3 down, 4 fire1, 5 fire2 */
           void cap32_ios_set_pad(unsigned int mask);
           int  cap32_main_c(int argc, char** argv);   /* wrapper around cap32_main() */
@@ -4977,7 +5077,7 @@ jobs:
           EXE=$(find "$SYMBIAN_VOL/sdks" -name 'cap32.exe' -path '*urel*' -print -quit)
           test -n "$EXE" || { echo "cap32.exe was not produced"; grep -n 'rror\|undefined\|multiple definition' "$GITHUB_WORKSPACE/app-build.log" | head -60; exit 1; }
           ls -l "$EXE"
-          # symbol list for turning addresses from the device log (PC / LR in cap32_wd.txt) into function names
+          # symbol list for turning addresses from the device log (PC / LR in the WD lines of cap32_log.txt) into function names
           SYM=$(find "$SYMBIAN_VOL/sdks" \( -name 'cap32.exe.sym' -o -name 'cap32.sym' \) -print -quit 2>/dev/null || true)
           MAPF=$(find "$SYMBIAN_VOL/sdks" -name 'cap32*.map' -print -quit 2>/dev/null || true)
           NM=$(command -v arm-none-symbianelf-nm || find "$SYMBIAN_VOL" -name 'arm-none-symbianelf-nm' -print -quit 2>/dev/null || true)
